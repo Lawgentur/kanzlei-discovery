@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-width=1.0">
+    <title>Kanzlei Jobs Filter</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .container {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 100%;
+            overflow-x: auto;
+        }
+        .upload-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 6px;
+            border: 1px dashed #ccc;
+        }
+        .action-btn {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .action-btn:hover {
+            background-color: #218838;
+        }
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        #status {
+            font-size: 14px;
+            font-weight: bold;
+            color: #666;
+            margin-top: 10px;
+            display: block;
+        }
+        .filter-container {
+            display: flex;
+            gap: 20px;
+            background: #f1f8ff;
+            padding: 15px;
+            border-left: 4px solid #007bff;
+            border-radius: 4px;
+            margin-top: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .search-box {
+            flex: 1;
+            min-width: 300px;
+        }
+        .date-filter {
+            min-width: 250px;
+        }
+        #simpleSearch {
+            padding: 10px;
+            width: 100%;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        select {
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 100%;
+        }
+        .search-hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+            display: block;
+        }
+        #htmlTable {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        #htmlTable th, #htmlTable td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        #htmlTable th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+        }
+        #htmlTable tr:nth-child(even) { background-color: #f9f9f9; }
+        #htmlTable tr:hover { background-color: #eef5ff; }
+        .hidden { display: none; }
+        
+        .badge-new {
+            background-color: #28a745;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Kanzlei Jobs Datenbank</h1>
+        
+        <div class="upload-section">
+            <strong>Schritt 1:</strong> Bitte wähle die heruntergeladene Datei <code>jobs_master.csv</code> aus.<br>
+            <input type="file" id="csvFileInput" accept=".csv"><br>
+            <strong>Schritt 2:</strong><br>
+            <button id="loadBtn" class="action-btn" onclick="processFile()">Gewählte Datei jetzt einlesen</button>
+            <span id="status">Warte auf Datei...</span>
+        </div>
+        
+        <div id="filterContainer" class="filter-container hidden">
+            <div class="search-box">
+                <label for="simpleSearch"><strong>Stichwort-Suche:</strong></label>
+                <input type="text" id="simpleSearch" onkeyup="filterTable()" placeholder="Z.B. Köln Rechtsanwaltsfachangestellte">
+                <span class="search-hint">Beliebig viele Begriffe kombinierbar.</span>
+            </div>
+            
+            <div class="date-filter">
+                <label for="dateSelect"><strong>Aktualität (Zuletzt gesehen):</strong></label>
+                <select id="dateSelect" onchange="filterTable()">
+                    <option value="all">Alle Jobs anzeigen</option>
+                    <option value="7">Nur Jobs der letzten 7 Tage</option>
+                    <option value="14">Nur Jobs der letzten 14 Tage</option>
+                    <option value="21">Nur Jobs der letzten 3 Wochen</option>
+                    <option value="30">Nur Jobs der letzten 30 Tage</option>
+                </select>
+            </div>
+            
+            <div style="width: 100%;">
+                <div id="resultCount" style="margin-top: 10px; font-weight: bold; color: #28a745;"></div>
+            </div>
+        </div>
+
+        <table id="htmlTable" class="hidden">
+            <thead>
+                <tr>
+                    <th>Kanzlei</th>
+                    <th>Jobtitel</th>
+                    <th>Ort</th>
+                    <th>Link</th>
+                    <th>Erstmals gefunden</th>
+                    <th>Zuletzt gesehen</th>
+                    <th>Email</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        let allRowsData = []; // Speichert [searchText, trElement, lastSeenDate]
+        
+        function filterTable() {
+            const input = document.getElementById("simpleSearch").value.toLowerCase().trim();
+            const searchTerms = input.split(/\s+/).filter(word => word.length > 0);
+            const dateSelect = document.getElementById("dateSelect").value;
+            
+            // Berechne Cutoff-Datum für den Zeitfilter
+            let cutoffDate = new Date('1970-01-01'); // Standard: Weit in der Vergangenheit
+            if (dateSelect !== 'all') {
+                cutoffDate = new Date();
+                cutoffDate.setDate(cutoffDate.getDate() - parseInt(dateSelect));
+                cutoffDate.setHours(0,0,0,0);
+            }
+
+            let visibleCount = 0;
+            const maxVisible = 500;
+
+            for (let i = 0; i < allRowsData.length; i++) {
+                const item = allRowsData[i];
+                const tr = item.trElement;
+                const rowText = item.searchText;
+                const lastSeenStr = item.lastSeenDate;
+                
+                // 1. Text Filter checken
+                let matchesText = true;
+                for (let term of searchTerms) {
+                    if (rowText.indexOf(term) === -1) {
+                        matchesText = false;
+                        break;
+                    }
+                }
+
+                if (!matchesText) {
+                    tr.style.display = "none";
+                    continue;
+                }
+                
+                // 2. Datums Filter checken
+                let matchesDate = true;
+                if (dateSelect !== 'all') {
+                    // Mache aus "2026-04-24" ein echtes Date Objekt
+                    if (!lastSeenStr) {
+                        matchesDate = false; // Wenn kein Datum, fällt es bei aktivem Filter raus
+                    } else {
+                        const rowDate = new Date(lastSeenStr);
+                        if (isNaN(rowDate.getTime()) || rowDate < cutoffDate) {
+                            matchesDate = false;
+                        }
+                    }
+                }
+
+                // 3. Finale Anzeige
+                if (matchesText && matchesDate) {
+                    if (visibleCount < maxVisible) {
+                        tr.style.display = "";
+                    } else {
+                        tr.style.display = "none";
+                    }
+                    visibleCount++;
+                } else {
+                    tr.style.display = "none";
+                }
+            }
+
+            // Statistik aktualisieren
+            const countLabel = document.getElementById('resultCount');
+            if (visibleCount === 0) {
+                countLabel.innerText = "Keine passenden Jobs gefunden.";
+                countLabel.style.color = "#d9534f";
+            } else if (visibleCount > maxVisible) {
+                countLabel.innerText = `${visibleCount} Treffer gefunden! (Zeige die ersten ${maxVisible} an)`;
+                countLabel.style.color = "#28a745";
+            } else {
+                countLabel.innerText = `${visibleCount} Treffer gefunden!`;
+                countLabel.style.color = "#28a745";
+            }
+        }
+
+        function parseCSVLine(text) {
+            let ret = [], inQuote = false, value = '';
+            for (let i = 0; i < text.length; i++) {
+                let char = text[i];
+                if (inQuote) {
+                    if (char === '"') {
+                        if (i < text.length - 1 && text[i+1] === '"') {
+                            value += '"'; i++;
+                        } else { inQuote = false; }
+                    } else { value += char; }
+                } else {
+                    if (char === '"') { inQuote = true; } 
+                    else if (char === ',') { ret.push(value); value = ''; } 
+                    else { value += char; }
+                }
+            }
+            ret.push(value);
+            return ret;
+        }
+
+        function processFile() {
+            const statusEl = document.getElementById('status');
+            const fileInput = document.getElementById('csvFileInput');
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert("Bitte wähle zuerst eine Datei aus!");
+                return;
+            }
+
+            statusEl.style.color = '#007bff';
+            statusEl.innerText = "Lese Datei ein... Einen Moment bitte!";
+
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    let text = e.target.result;
+                    // Fix BOM
+                    if (text.charCodeAt(0) === 0xFEFF) {
+                        text = text.substring(1);
+                    }
+                    const lines = text.split(/\r?\n/);
+                    
+                    const tbody = document.getElementById('tableBody');
+                    let htmlString = '';
+                    allRowsData = []; // RAM Reset
+                    let validCount = 0;
+
+                    // Prüfe Format anhand Header
+                    const headers = parseCSVLine(lines[0]);
+                    const isNewFormat = headers.includes('Erstes_Funddatum');
+
+                    // Baue zunächst HTML als String für pure Geschwindigkeit
+                    for (let i = 1; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (!line) continue;
+
+                        const row = parseCSVLine(line);
+                        if (!row[0] && !row[1]) continue;
+
+                        validCount++;
+                        
+                        let kanzlei = row[0] || '';
+                        let titel = row[1] || '';
+                        let ort = row[2] || '';
+                        
+                        let linkHtml = row[3] || '';
+                        if (linkHtml && linkHtml.startsWith('http')) {
+                            linkHtml = `<a href="${linkHtml}" target="_blank">Zum Job</a>`;
+                        }
+                        
+                        let erstesFunddatum = '';
+                        let zuletztGesehen = '';
+                        let email = '';
+                        
+                        // Fallback für alte und neue CSV Variante
+                        if (isNewFormat) {
+                            erstesFunddatum = row[4] || '';
+                            zuletztGesehen = row[5] || '';
+                            email = row[6] || '';
+                        } else {
+                            erstesFunddatum = row[4] || '';
+                            zuletztGesehen = row[4] || '';
+                            email = row[5] || '';
+                        }
+
+                        if (email && email.includes('@')) {
+                            email = `<a href="mailto:${email}">${email}</a>`;
+                        }
+                        
+                        // Markiere Jobs, die erst heute/gestern entdeckt wurden
+                        let dateHtml = erstesFunddatum;
+                        if (erstesFunddatum === zuletztGesehen) {
+                            dateHtml += ' <span class="badge-new">NEU</span>';
+                        }
+
+                        // Kombinierten Text für ultraschnelle Suche
+                        const rowSearchText = [kanzlei, titel, ort].join(" ").toLowerCase();
+
+                        htmlString += `<tr>
+                            <td>${kanzlei}</td>
+                            <td>${titel}</td>
+                            <td>${ort}</td>
+                            <td>${linkHtml}</td>
+                            <td>${dateHtml}</td>
+                            <td>${zuletztGesehen}</td>
+                            <td>${email}</td>
+                        </tr>`;
+                    }
+
+                    // Ins DOM einhängen
+                    tbody.innerHTML = htmlString;
+                    
+                    // Trs cachen für schnelles Filtern
+                    const trs = tbody.getElementsByTagName("tr");
+                    for (let i = 1; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (!line) continue;
+                        const row = parseCSVLine(line);
+                        if (!row[0] && !row[1]) continue;
+                        
+                        const trIndex = allRowsData.length;
+                        
+                        // Das `zuletztGesehen` Datum ermitteln für den Datumsfilter
+                        let zuletztGesehen = isNewFormat ? (row[5] || '') : (row[4] || '');
+                        
+                        // Extrahiere YYYY-MM-DD
+                        let cleanDate = '';
+                        const dateMatch = zuletztGesehen.match(/\\b(20\\d{2}-\\d{2}-\\d{2})\\b/);
+                        if (dateMatch) {
+                            cleanDate = dateMatch[1];
+                        } else {
+                            // Einfacher Fallback
+                            cleanDate = zuletztGesehen.substring(0, 10);
+                        }
+
+                        allRowsData.push({
+                            searchText: [row[0]||'', row[1]||'', row[2]||''].join(" ").toLowerCase(),
+                            trElement: trs[trIndex],
+                            lastSeenDate: cleanDate
+                        });
+                    }
+                    
+                    // UI updaten
+                    document.getElementById('filterContainer').classList.remove('hidden');
+                    document.getElementById('htmlTable').classList.remove('hidden');
+
+                    statusEl.style.color = '#28a745';
+                    statusEl.innerText = `Erfolgreich eingelesen: ${validCount} Jobs! Datenbank ist auf dem neuesten Stand.`;
+                    
+                    filterTable(); 
+
+                } catch (err) {
+                    statusEl.style.color = '#d9534f';
+                    statusEl.innerText = "Fehler beim Verarbeiten: " + err.message;
+                    console.error(err);
+                }
+            };
+            reader.readAsText(file, 'UTF-8');
+        }
+    </script>
+</body>
+</html>

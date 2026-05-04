@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-width=1.0">
+    <title>Kanzlei Jobs Filter</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .container {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 100%;
+            overflow-x: auto;
+        }
+        .upload-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 6px;
+            border: 1px dashed #ccc;
+        }
+        .action-btn {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .action-btn:hover {
+            background-color: #218838;
+        }
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        #status {
+            font-size: 14px;
+            font-weight: bold;
+            color: #666;
+            margin-top: 10px;
+            display: block;
+        }
+        .search-box {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f1f8ff;
+            border-left: 4px solid #007bff;
+            border-radius: 4px;
+        }
+        #simpleSearch {
+            padding: 10px;
+            width: 100%;
+            max-width: 500px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .search-hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+            display: block;
+        }
+        #htmlTable {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        #htmlTable th, #htmlTable td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        #htmlTable th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+        }
+        #htmlTable tr:nth-child(even) { background-color: #f9f9f9; }
+        #htmlTable tr:hover { background-color: #eef5ff; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Kanzlei Jobs Datenbank</h1>
+        
+        <div class="upload-section">
+            <strong>Schritt 1:</strong> Bitte wähle die heruntergeladene Datei <code>jobs_master.csv</code> aus.<br>
+            <input type="file" id="csvFileInput" accept=".csv"><br>
+            <strong>Schritt 2:</strong><br>
+            <button id="loadBtn" class="action-btn" onclick="processFile()">Gewählte Datei jetzt einlesen</button>
+            <span id="status">Warte auf Datei...</span>
+        </div>
+        
+        <div id="searchContainer" class="search-box hidden">
+            <input type="text" id="simpleSearch" onkeyup="filterTable()" placeholder="Z.B. Köln Rechtsanwaltsfachangestellte">
+            <span class="search-hint">Tipp: Gib mehrere Wörter ein, um kombiniert zu suchen. (Die Reihenfolge ist egal)</span>
+            <div id="resultCount" style="margin-top: 10px; font-weight: bold; color: #28a745;"></div>
+        </div>
+
+        <table id="htmlTable" class="hidden">
+            <thead>
+                <tr>
+                    <th>Kanzlei</th>
+                    <th>Jobtitel</th>
+                    <th>Ort</th>
+                    <th>Link</th>
+                    <th>Funddatum</th>
+                    <th>Email</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        let allRowsData = []; // Speichert den reinen Text jeder Zeile im RAM für ultra-schnelle Suche
+
+        function filterTable() {
+            const input = document.getElementById("simpleSearch").value.toLowerCase().trim();
+            // Zerlege die Suche in einzelne Wörter (z.B. ["köln", "rechtsanwaltsfachangestellte"])
+            const searchTerms = input.split(/\s+/).filter(word => word.length > 0);
+            
+            const tbody = document.getElementById("tableBody");
+            const trs = tbody.getElementsByTagName("tr");
+
+            let visibleCount = 0;
+            const maxVisible = 500;
+
+            for (let i = 0; i < trs.length; i++) {
+                const rowText = allRowsData[i];
+                let matchesAll = true;
+
+                // Jedes gesuchte Wort muss in der Zeile vorkommen
+                for (let term of searchTerms) {
+                    if (rowText.indexOf(term) === -1) {
+                        matchesAll = false;
+                        break;
+                    }
+                }
+
+                if (matchesAll) {
+                    if (visibleCount < maxVisible) {
+                        trs[i].style.display = "";
+                        visibleCount++;
+                    } else {
+                        trs[i].style.display = "none";
+                        visibleCount++; // Wir zählen trotzdem weiter, für die Statistik
+                    }
+                } else {
+                    trs[i].style.display = "none";
+                }
+            }
+
+            // Statistik aktualisieren
+            const countLabel = document.getElementById('resultCount');
+            if (visibleCount === 0) {
+                countLabel.innerText = "Keine passenden Jobs gefunden.";
+                countLabel.style.color = "#d9534f";
+            } else if (visibleCount > maxVisible) {
+                countLabel.innerText = `${visibleCount} Treffer gefunden! (Zeige die ersten ${maxVisible} an)`;
+                countLabel.style.color = "#28a745";
+            } else {
+                countLabel.innerText = `${visibleCount} Treffer gefunden!`;
+                countLabel.style.color = "#28a745";
+            }
+        }
+
+        function parseCSVLine(text) {
+            let ret = [], inQuote = false, value = '';
+            for (let i = 0; i < text.length; i++) {
+                let char = text[i];
+                if (inQuote) {
+                    if (char === '"') {
+                        if (i < text.length - 1 && text[i+1] === '"') {
+                            value += '"'; i++;
+                        } else { inQuote = false; }
+                    } else { value += char; }
+                } else {
+                    if (char === '"') { inQuote = true; } 
+                    else if (char === ',') { ret.push(value); value = ''; } 
+                    else { value += char; }
+                }
+            }
+            ret.push(value);
+            return ret;
+        }
+
+        function processFile() {
+            const statusEl = document.getElementById('status');
+            const fileInput = document.getElementById('csvFileInput');
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert("Bitte wähle zuerst eine Datei aus!");
+                return;
+            }
+
+            statusEl.style.color = '#007bff';
+            statusEl.innerText = "Lese Datei ein... Einen Moment bitte!";
+
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    const text = e.target.result;
+                    const lines = text.split(/\r?\n/);
+                    
+                    const tbody = document.getElementById('tableBody');
+                    let htmlString = '';
+                    allRowsData = []; // RAM Reset
+                    let validCount = 0;
+
+                    for (let i = 1; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (!line) continue;
+
+                        const row = parseCSVLine(line);
+                        if (!row[0] && !row[1]) continue;
+
+                        validCount++;
+                        
+                        let linkHtml = row[3];
+                        if (linkHtml && linkHtml.startsWith('http')) linkHtml = `<a href="${linkHtml}" target="_blank">Zum Job</a>`;
+                        
+                        let emailHtml = row[5] || '';
+                        if (emailHtml && emailHtml.includes('@')) emailHtml = `<a href="mailto:${emailHtml}">${emailHtml}</a>`;
+
+                        // Kombinierten Text für ultraschnelle Index-Suche speichern
+                        const rowSearchText = row.join(" ").toLowerCase();
+                        allRowsData.push(rowSearchText);
+
+                        const displayStyle = validCount <= 500 ? '' : 'style="display:none;"';
+
+                        htmlString += `<tr ${displayStyle}>
+                            <td>${row[0] || ''}</td>
+                            <td>${row[1] || ''}</td>
+                            <td>${row[2] || ''}</td>
+                            <td>${linkHtml}</td>
+                            <td>${row[4] || ''}</td>
+                            <td>${emailHtml}</td>
+                        </tr>`;
+                    }
+
+                    tbody.innerHTML = htmlString;
+                    
+                    // Zeige Suchfeld und Tabelle an
+                    document.getElementById('searchContainer').classList.remove('hidden');
+                    document.getElementById('htmlTable').classList.remove('hidden');
+
+                    statusEl.style.color = '#28a745';
+                    statusEl.innerText = `Erfolgreich eingelesen: ${validCount} Jobs in der Datenbank!`;
+                    
+                    filterTable(); // Initiale Anzeige updaten
+
+                } catch (err) {
+                    statusEl.style.color = '#d9534f';
+                    statusEl.innerText = "Fehler beim Verarbeiten: " + err.message;
+                }
+            };
+            reader.readAsText(file, 'UTF-8');
+        }
+    </script>
+</body>
+</html>
