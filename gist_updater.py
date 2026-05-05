@@ -6,7 +6,7 @@ import urllib.request
 import urllib.parse
 
 # Konfiguration
-GITHUB_TOKEN = "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"
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GIST_ID_FILE = "state/gist_id.txt"
 CSV_FILE = "jobs_master.csv"
 FILENAME = "jobs_master_public.csv"

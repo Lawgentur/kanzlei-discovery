@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-04T06:41:08.167Z",
+  "updatedAt": "2026-05-05T07:07:28.520Z",
   "entries": {
     "memory:memory/2026-04-09.md:1:5": {
       "key": "memory:memory/2026-04-09.md:1:5",
@@ -9,18 +9,20 @@
       "endLine": 5,
       "source": "memory",
       "snippet": "## 2026-04-09 - **Project \"Kanzlei Discovery\" Update:** The user runs a scraper at `/home/ubuntu/kanzlei_discovery/` via cron (Sundays), producing data in `data/` including a 3MB `jobs_master.csv`. - **Infrastructure Note:** User is accessing OpenClaw via `myclaw.ai` (no direct SSH/filesystem access). Delivered a large CSV export by uploading it to gofile.io. - **Current Status:** User wants to enrich the firm database with a custom list of domains. The chat text was too long and truncated. I created an extraction script (`/home/ubuntu/kanzlei_discovery/check_new_domains.js`) and am waiting for the user to upload the full list as `input_domains.txt` into the workspace to finalize the cross-r",
-      "recallCount": 1,
+      "recallCount": 2,
       "dailyCount": 0,
       "groundedCount": 0,
-      "totalScore": 0.8211303024024672,
-      "maxScore": 0.8211303024024672,
+      "totalScore": 1.8211303024024672,
+      "maxScore": 1,
       "firstRecalledAt": "2026-05-04T06:41:08.167Z",
-      "lastRecalledAt": "2026-05-04T06:41:08.167Z",
+      "lastRecalledAt": "2026-05-05T07:07:28.520Z",
       "queryHashes": [
-        "1cb3b0956939"
+        "1cb3b0956939",
+        "4d62d40ff525"
       ],
       "recallDays": [
-        "2026-05-04"
+        "2026-05-04",
+        "2026-05-05"
       ],
       "conceptTags": [
         "home/ubuntu/kanzlei-discovery",
@@ -40,18 +42,20 @@
       "endLine": 3,
       "source": "memory",
       "snippet": "## 2026-04-24 - **Kanzlei Discovery Update:** The user will provide a Google Sheet link containing a list of law firms. - **Pending Task:** Once the link is provided, I need to fetch the list, cross-reference and append it to the existing scraping list, and immediately start the scrape and qualification process for any newly added firms.",
-      "recallCount": 1,
+      "recallCount": 2,
       "dailyCount": 0,
       "groundedCount": 0,
-      "totalScore": 0.6345468140519709,
-      "maxScore": 0.6345468140519709,
+      "totalScore": 1.634546814051971,
+      "maxScore": 1,
       "firstRecalledAt": "2026-05-04T06:41:08.167Z",
-      "lastRecalledAt": "2026-05-04T06:41:08.167Z",
+      "lastRecalledAt": "2026-05-05T07:07:28.520Z",
       "queryHashes": [
-        "1cb3b0956939"
+        "1cb3b0956939",
+        "4d62d40ff525"
       ],
       "recallDays": [
-        "2026-05-04"
+        "2026-05-04",
+        "2026-05-05"
       ],
       "conceptTags": [
         "cross-reference",
