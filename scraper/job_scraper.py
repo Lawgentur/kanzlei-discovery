@@ -36,6 +36,10 @@ try:
 except ImportError:
     HAS_OPENAI = False
 
+# Gemini API Konfiguration
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
 # ===================== LOGGING =====================
 logging.basicConfig(
     level=logging.INFO,
@@ -53,7 +57,7 @@ class Config:
     max_concurrent: int = 3  # Konservativ für GitHub Actions
     max_retries: int = 1
     direct_api_timeout: int = 15
-    llm_model: str = "gemini-2.5-flash"
+    llm_model: str = "gemini-3-flash-preview"
     llm_max_tokens: int = 4000
     chunk_chars: int = 12000
     
@@ -1118,11 +1122,17 @@ class JSONAPIParser:
 
 # ===================== LLM FALLBACK =====================
 class LLMExtractor:
-    """Nutzt Gemini Flash als Fallback für schwierige Seiten."""
+    """Nutzt Gemini 3 Flash als Fallback für schwierige Seiten."""
     
     def __init__(self):
-        if HAS_OPENAI:
-            self.client = OpenAI()  # Nutzt env vars
+        if HAS_OPENAI and GEMINI_API_KEY:
+            self.client = OpenAI(
+                api_key=GEMINI_API_KEY,
+                base_url=GEMINI_BASE_URL,
+            )
+        elif HAS_OPENAI and os.environ.get("OPENAI_API_KEY"):
+            # Fallback: Standard OpenAI-Konfiguration
+            self.client = OpenAI()
         else:
             self.client = None
     
