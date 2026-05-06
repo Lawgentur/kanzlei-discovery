@@ -93,9 +93,7 @@ jobs:
             --batch-size ${{ env.BATCH_SIZE }} \
             --target-csv target_firms_full.csv \
             --output-dir batch_results
-             env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-
+ 
       - name: Batch-Ergebnisse hochladen
         uses: actions/upload-artifact@v4
         with:
