@@ -233,6 +233,111 @@ class Company:
 
 
 # ===================== HILFSFUNKTIONEN =====================
+def is_valid_job(job) -> bool:
+    """Zentrale Validierung: Ist dieser Eintrag eine echte Stellenanzeige?
+    Wird nach ALLEN Extraktionsmethoden als finaler Filter angewendet."""
+    title = job.title.strip()
+    title_lower = title.lower()
+    url = job.link.lower() if job.link else ""
+    
+    # === REGEL 1: Mindestlänge ===
+    if len(title) < 4:
+        return False
+    
+    # === REGEL 2: Offensichtliche Nicht-Jobs (exakt) ===
+    reject_exact = {
+        "bottom-left", "bottom-right", "top-left", "top-right",
+        "news & events", "jobs & karriere", "karriere", "careers",
+        "alle stellenangebote", "alle offenen stellenanzeigen",
+        "view all locations", "mehr erfahren", "weiterlesen",
+    }
+    if title_lower in reject_exact:
+        return False
+    
+    # === REGEL 3: URL-basierte Ausschlüsse ===
+    non_job_url_segments = [
+        "/sectors/", "/services/", "/insights/", "/news/",
+        "/rechtsgebiete/", "/rechtsgebiete#", "/transformation/",
+        "/solutions", "/for-good", "/locations",
+        "/lawyers/", "/people/", "/team/",
+        "/blog/", "/alumni/", "/events/",
+        "/california-privacy", "/website-privacy", "/uk-tax-strategy",
+        "javascript:",
+    ]
+    if url and any(seg in url for seg in non_job_url_segments):
+        # Ausnahme: URL enthält auch Job-Hinweise
+        job_url_hints = ["/job", "/stelle", "/position", "/vacancy", "/opening", "/career"]
+        if not any(hint in url for hint in job_url_hints):
+            return False
+    
+    # === REGEL 4: Muster-basierte Ausschlüsse für Titel ===
+    reject_patterns = [
+        r"^careers? in ",  # "Careers in Belgium"
+        r"^view all",
+        r"^learn more",
+        r"^alle (karriere|offenen|stellen)",
+        r"^einstieg bei ",
+        r"^ihre chancen bei",
+        r"^deine karriere",
+        r"privacy (notice|policy)",
+        r"tax strategy",
+        r"scam communications",
+        r"\bpodcast\b.*\d{4}",  # Podcast mit Datum = Blog
+        r"^\".*\"\s*-\s",  # Zitate = Blog
+        r"\binterview\b.*(partnerinnen|partner).*\d{4}",  # Partner-Interviews = Blog
+        r"^what.*(clients|horizon)",  # "What our clients..." / "What's on the horizon"
+        r"cbh in der presse",
+        # Hinweis: "Zur Initiativbewerbung" wird als generischer Link behandelt,
+        # da es kein spezifischer Jobtitel ist. Echte Initiativbewerbungen haben
+        # typischerweise "Initiativbewerbung (m/w/d)" als Titel.
+    ]
+    if any(re.search(p, title_lower) for p in reject_patterns):
+        return False
+    
+    # === REGEL 4b: Kategorieseiten (enthalten Job-Keywords aber sind keine Stellen) ===
+    # Muster: Komma-getrennte Berufsgruppen als Navigations-Kategorie
+    if re.match(r'^[^(]+,\s*[^(]+,\s*[^(]+$', title) and '(m' not in title_lower and '(w' not in title_lower:
+        # "Rechtsanwälte, Wirtschaftsprüfer, Steuerberater" = Kategorie
+        # Aber "Referendar (m/w/d), wissenschaftliche Mitarbeiter (m/w/d)" = echte Stelle
+        if not re.search(r'/d\)|/x\)', title):
+            return False
+    
+    # Muster: "X & Y" als Kategorieseite (nur wenn es ein kurzer Titel ohne Job-Keywords ist)
+    if re.match(r'^[\w\säöüÄÖÜ-]+\s*&\s*[\w\säöüÄÖÜ-]+$', title):
+        # Nur wenn KEIN Job-Keyword enthalten UND kurz (< 40 Zeichen)
+        if len(title) < 40 and not re.search(r'rechtsanwalt|steuer|notar|fachangestellte|buchhalter|assisten|referendar|studium|ausbildung|praktik', title_lower):
+            return False
+    
+    # === REGEL 5: Personennamen (z.B. Anwaltsprofile) ===
+    # Muster: "Vorname Nachname" ohne Job-Keywords, URL enthält /lawyers/
+    if "/lawyers/" in url or "/people/" in url or "/team/" in url:
+        return False
+    # Kurze Namen (2-3 Wörter, nur Großbuchstaben-Anfang, keine Job-Keywords)
+    if re.match(r'^[A-Z][a-zäöü]+\.?\s+[A-Z]', title) and len(title.split()) <= 4:
+        # Prüfe ob es ein Name ist (keine Job-Keywords enthalten)
+        if not re.search(r'rechtsanwalt|steuer|notar|fachangestellte|buchhalter|assisten|referendar|jurist|anwalt|praktikant|mitarbeiter|manager|consultant|\(m/w|\(w/m', title_lower):
+            return False
+    
+    # === REGEL 6: Reine Kategorien/Rechtsgebiete (ohne Job-Indikator) ===
+    category_patterns = [
+        r"^(energy|financial services|life sciences|mobility|retail|technology)",
+        r"^(real estate|regulatory|artificial intelligence|online safety)$",
+        r"^(the built environment|urban dynamics|workforce solutions)$",
+        r"^(unternehmen|infrastruktur|geistiges eigentum|immobilien).*&",
+        r"^(handels-|mergers & acquisitions|venture capital|banken)",
+        r"^(startup-beratung|professional liability|innovation contest)$",
+        r"^(wirtschaftsjuristen|business services)$",
+        r"^(esg|esg \u2013|it and data)$",
+        r"^osborne clarke",
+    ]
+    if any(re.search(p, title_lower) for p in category_patterns):
+        # Nur ablehnen wenn kein starker Job-Indikator vorhanden
+        if not re.search(r'\(m/w/d\)|\(w/m/d\)|\(m/f/d\)', title):
+            return False
+    
+    return True
+
+
 def detect_ats(url: str) -> str:
     """Erkennt das ATS-System anhand der URL."""
     if not url:
@@ -891,39 +996,164 @@ class DOMParser:
         
         text_lower = text.lower().strip()
         
-        # Definitiv kein Job-Titel
-        non_job = [
+        # Definitiv kein Job-Titel: exakte Matches
+        non_job_exact = [
             "impressum", "datenschutz", "kontakt", "about", "login",
             "menü", "menu", "home", "cookie", "agb", "terms", "privacy",
             "faq", "hilfe", "help", "suche", "search", "blog", "news",
             "mehr erfahren", "weiterlesen", "zurück", "back",
-            "alle anzeigen", "filter", "sortieren",
+            "alle anzeigen", "filter", "sortieren", "bottom-left",
+            "bottom-right", "top-left", "top-right",
+            "news & events", "veranstaltungen & seminare",
+            "jobs & karriere", "alle stellenangebote", "alle offenen stellenanzeigen",
+            "view all locations", "careers", "karriere",
         ]
-        if text_lower in non_job:
+        if text_lower in non_job_exact:
             return False
         
-        # Starke Job-Indikatoren
+        # Definitiv kein Job-Titel: Muster-basiert
+        non_job_patterns = [
+            r"^careers? in ",  # "Careers in Belgium", "Careers in France"
+            r"^view all",  # "View All Locations"
+            r"privacy (notice|policy)",
+            r"tax strategy",
+            r"scam communications",
+            r"^learn more",
+            r"^alle (karriere|offenen|stellen)",
+            r"^einstieg bei ",
+            r"^ihre chancen",
+            r"^deine karriere",
+            r"^cbh in der presse",
+            r"^(unternehmen|infrastruktur|geistiges eigentum|immobilien).*&",  # Rechtsgebiete
+            r"^(handels-|mergers|venture|banken|betriebliche|vorstände)",  # Praxisgruppen
+            r"^(energy|financial|life sciences|mobility|retail|technology|urban)",  # Sektoren
+            r"^(regulatory|artificial intelligence|online safety|knowledge notes)",  # Topics
+            r"^(european electronic|the new deal|the built environment)",  # Topics
+            r"^osborne clarke",  # Firmenname als Titel
+            r"california privacy",
+            r"^alumni",
+            r"^(what our clients|what's on the horizon)",
+            r"^(innovation contest|business services)$",  # Kategorien ohne Job-Kontext
+            r"^wirtschaftsjuristen$",  # Kategorie
+            r"^(startup-beratung|professional liability)$",
+            r"\bpodcast\b",  # Blog/Podcast-Einträge
+            r"\binterview\b.*\d{4}",  # "Interview ... 2022" = Blog
+            r"^\".*\"\s*-\s",  # Zitate = Blog-Einträge
+        ]
+        if any(re.search(p, text_lower) for p in non_job_patterns):
+            return False
+        
+        # Starke Job-Indikatoren (definitiv ein Job)
+        # Basierend auf Analyse von 638 echten Stellentiteln aus Kanzleien
         job_indicators = [
-            r"\(m/w/d\)", r"\(w/m/d\)", r"\(m/f/d\)", r"\(all genders\)",
-            r"\(d/m/w\)", r"\(gn\)", r"\*in\b",
-            r"rechtsanwalt", r"rechtsanwältin", r"anwalt", r"anwältin",
-            r"referendar", r"fachangestellte", r"jurist", r"notar",
-            r"partner\b", r"associate", r"counsel", r"of counsel",
-            r"sekretär", r"assistent", r"manager", r"consultant",
-            r"developer", r"engineer", r"analyst", r"berater",
-            r"praktikant", r"werkstudent", r"trainee", r"azubi",
-            r"ausbildung", r"volljurist", r"syndikus",
-            r"steuerfach", r"wirtschaftsprüf", r"buchhalter",
+            # === Gender-Kennzeichnungen (stärkster Indikator) ===
+            r"\(m/w/d\)", r"\(w/m/d\)", r"\(m/f/d\)", r"\(m/f/x\)",
+            r"\(all genders\)", r"\(d/m/w\)", r"\(gn\)", r"\(m/w/x\)",
+            r"\(m/w\)", r"\(w/m\)",  # Ältere Variante ohne d
+            r"m/w/d",  # Auch ohne Klammern (z.B. "Rechtsanwaltsfachangestellte m/w/d")
+            # === Juristische Berufe ===
+            r"rechtsanwalt", r"rechtsanwält", r"\banwalt", r"\banwält",
+            r"rechtsanwalts-", r"fachanwalt", r"fachanwält",
+            r"volljurist", r"syndikus", r"jurist",
+            r"\bnotar", r"notariats",
+            r"patentanwalt", r"patentanwält", r"patentingenieur",
+            # === Fachangestellte / Assistenz ===
+            r"fachangestellte", r"fachkraft", r"rechtsfachwirt",
+            r"\bparalegal\b", r"\breno[s]?\b",
+            r"sekretär", r"\bassistenz\b", r"\bassistent", r"teamassist",
+            r"empfang", r"bürokraft", r"bürofach", r"bürokauf",
+            r"schreibkraft", r"office.?manager",
+            r"kanzleiassist",
+            # === Steuer / WP / Buchhaltung ===
+            r"steuer", r"wirtschaftsprüf", r"prüfungsassist", r"prüfungsleiter",
+            r"buchhalter", r"buchhaltung", r"bilanzbuch",
+            r"lohnbuch", r"lohnsach", r"lohnfach", r"payroll",
+            r"finanzbuch", r"finanzwirt",
+            # === Nachwuchs / Ausbildung ===
+            r"referendar", r"referendarin",
+            r"praktikant", r"praktikum", r"praktika\b",
+            r"werkstudent", r"werkstudentin",
+            r"\btrainee", r"\bazubi", r"auszubildende",
+            r"ausbildung", r"berufsausbildung", r"berufseinsteiger", r"berufsanfänger",
+            r"duales studium", r"studiengang",
+            r"wissenschaftliche", r"studentische",
+            r"law student", r"research assistant",
+            # === Management / Consulting ===
+            r"\bmanager\b", r"\bconsultant\b", r"\bcoordinator\b",
+            r"unternehmensberater",
+            # === IT / Tech ===
+            r"\bdeveloper\b", r"\bengineer\b", r"\banalyst\b",
+            r"it-administ", r"it-mitarbeiter", r"it-system", r"fachinformatiker",
+            # === Sonstige häufige Titel ===
+            r"\bberater\b", r"sachbearbeiter", r"sachbearbeitung",
+            r"mitarbeiter\b", r"\bmitarbeit\b",
+            r"initiativbewerbung", r"quereinsteiger",
+            r"insolvenzsach", r"insolvenzabwickl", r"insolvenzbuch",
+            r"fremdsprachenkorrespondent",
+            r"reinigungskräfte", r"servicekraft",
+            r"kauffrau", r"kaufmann", r"kaufleute", r"kaufmännisch",
+            r"diplom-jurist", r"diplom-finanzwirt",
+            r"\btalent pool\b",
+            # === Programm-basierte Stellen ===
+            r"programm.*(praktik|summer|winter)",
+            r"(lift off|insight).*\d{4}",
+            # === Englische Jobtitel (internationale Kanzleien) ===
+            r"\blawyer[s]?\b", r"\battorney[s]?\b", r"\blateral\b",
+            r"\breceptionist\b", r"\baccountant\b",
+            r"\bprofessionals\b",  # "Business Professionals"
         ]
         if any(re.search(p, text_lower) for p in job_indicators):
             return True
         
-        # Mindestlänge und keine reinen Navigations-Elemente
-        if len(text) >= 10 and not text.startswith(("#", "©", "→", "←")):
-            # Enthält Großbuchstaben (typisch für Titel)
-            if any(c.isupper() for c in text[1:]):
+        # Schwache Indikatoren: Nur akzeptieren wenn zusätzlicher Job-Kontext vorhanden
+        weak_indicators = [
+            r"\bassociate\b", r"\bcounsel\b", r"\bpartner\b",
+            r"\bsenior\b", r"\bjunior\b",
+        ]
+        if any(re.search(p, text_lower) for p in weak_indicators):
+            # Akzeptieren wenn es nach einem Job klingt
+            if re.search(r"\(m/w|m/f|stelle|position|bewerbung|senior |junior ", text_lower):
+                return True
+            # Oder wenn es ein zusammengesetzter Titel ist (z.B. "Senior Associate")
+            if re.search(r"(senior|junior)\s+(associate|counsel|manager|consultant)", text_lower):
                 return True
         
+        # Einzelwort-Berufsbezeichnungen (ohne m/w/d, aber trotzdem valide)
+        # Diese kommen häufig vor bei Kanzleien die keine Gender-Kennzeichnung nutzen
+        standalone_jobs = [
+            r"^rechtsanwaltsfachangestellte/?r?$",
+            r"^rechtsanwaltsfachangestellte:r$",
+            r"^notarfachangestellte/?r?$",
+            r"^steuerfachangestellte/?r?$",
+            r"^steuerfachwirt/?in$",
+            r"^steuerfachwirt:in$",
+            r"^steuerberater/?in$",
+            r"^steuerberater:in(nen)?$",
+            r"^bilanzbuchhalter/?in$",
+            r"^bilanzbuchhalter:in$",
+            r"^finanzbuchhalter/?in$",
+            r"^lohnbuchhalter/?in$",
+            r"^rechtsfachwirt/?in$",
+            r"^volljurist:in$",
+            r"^rechtsanwält:in$",
+            r"^anwalt:in$", r"^anwältin/anwalt$",
+            r"^referendar/?in$", r"^referendar:in(nen)?$",
+            r"^werkstudent/?in$", r"^werkstudent:in$",
+            r"^praktikant/?in$", r"^praktikant:in(nen)?$",
+            r"^paralegal$",
+            r"^teamassistenz$",
+            r"^referendare$", r"^referendarinnen$",
+            r"^auszubildende/?r?$",
+            r"^ausbildung$", r"^berufsausbildung$",
+            r"^referendariat$", r"^referendarausbildung$",
+            r"^praktikum$", r"^praktika$",
+        ]
+        if any(re.search(p, text_lower) for p in standalone_jobs):
+            return True
+        
+        # KEIN generischer Fallback!
+        # Der alte Code akzeptierte alles mit Großbuchstaben und >10 Zeichen.
+        # Das führte zu massiven False Positives (Rechtsgebiete, Sektoren, etc.)
         return False
     
     def _find_nearby_location(self, element) -> str:
@@ -1189,25 +1419,31 @@ class LLMExtractor:
         """Ruft das LLM auf und parst die Antwort."""
         system_prompt = """Du bist ein Experte für die Extraktion von Stellenanzeigen aus Karriereseiten von Kanzleien und Rechtsanwaltskanzleien in Deutschland.
 
-Deine Aufgabe: Extrahiere ALLE Stellenanzeigen/offenen Positionen aus dem gegebenen Text.
+Deine Aufgabe: Extrahiere ALLE tatsächlichen Stellenanzeigen/offenen Positionen aus dem gegebenen Text.
 
-Typische Jobtitel in Kanzleien:
+Typische Jobtitel in Kanzleien (enthalten fast immer "(m/w/d)" oder ähnliche Gender-Kennzeichnungen):
 - Rechtsanwalt/Rechtsanwältin (m/w/d), Partner, Associate, Counsel, Of Counsel
 - Rechtsanwaltsfachangestellte/r (ReFa), Rechtsfachwirt/in
 - Notar/in, Notarfachangestellte/r
 - Steuerfachangestellte/r, Steuerberater/in, Wirtschaftsprüfer/in
-- Referendar/in, Praktikant/in, Werkstudent/in
-- Sekretär/in, Partnerassistent/in, Office Manager
+- Referendar/in, Praktikant/in, Werkstudent/in, Wissenschaftliche/r Mitarbeiter/in
+- Sekretär/in, Partnerassistent/in, Office Manager, Assistenz
 - Syndikusrechtsanwalt/-anwältin, Volljurist/in
-- IT-Administrator, Marketing Manager, HR Manager (Kanzlei-intern)
+- IT-Administrator, Marketing Manager, HR Manager, Sachbearbeiter/in
+- Auszubildende/r, Duales Studium
 
-Regeln:
-1. Gib NUR tatsächliche Stellenanzeigen zurück, keine Beschreibungen der Kanzlei
-2. Ignoriere Navigations-Elemente, Menüpunkte, Footer-Links
-3. Wenn keine Stellen gefunden werden, gib ein leeres Array zurück
-4. Standort: Wenn nicht angegeben, leer lassen
-5. Datum: Wenn nicht angegeben, leer lassen
-6. Link: Wenn ein spezifischer Job-Link vorhanden ist, diesen verwenden
+STRENGE Regeln:
+1. Gib NUR tatsächliche Stellenanzeigen zurück - das sind konkrete offene Positionen, auf die man sich bewerben kann
+2. KEINE Rechtsgebiete, Praxisgruppen, Sektoren oder Fachbereiche (z.B. "Real Estate", "Corporate/M&A", "Arbeitsrecht")
+3. KEINE Navigations-Elemente, Menüpunkte, Footer-Links, Kategorien
+4. KEINE Blog-Einträge, News, Podcasts, Interviews, Veranstaltungen
+5. KEINE Personennamen (Anwaltsprofile)
+6. KEINE generischen Links wie "Mehr erfahren", "Alle Stellen", "Karriere"
+7. Ein echter Jobtitel enthält typischerweise eine Berufsbezeichnung UND oft (m/w/d)
+8. Wenn keine echten Stellen gefunden werden, gib ein leeres Array zurück
+9. Standort: Wenn nicht angegeben, leer lassen
+10. Datum: Wenn nicht angegeben, leer lassen
+11. Link: Wenn ein spezifischer Job-Link vorhanden ist, diesen verwenden
 
 Antworte AUSSCHLIESSLICH mit validem JSON im Format:
 {"jobs": [{"title": "...", "location": "...", "date": "YYYY-MM-DD", "link": "..."}]}"""
@@ -1440,7 +1676,7 @@ class JobScraper:
             if jobs:
                 german_jobs = [j for j in jobs if config.is_german_location(j.location)]
                 if german_jobs:
-                    return german_jobs
+                    return self._apply_final_filter(german_jobs)
         
         # Schritt 3: Browser-basiertes Scraping
         html, json_responses = self.browser.scrape(company)
@@ -1454,7 +1690,7 @@ class JobScraper:
             jobs, filtered = parser.parse(json_responses)
             if jobs:
                 logger.info(f"    → {len(jobs)} Jobs via JSON-API ({filtered} gefiltert)")
-                return jobs
+                return self._apply_final_filter(jobs)
         
         # Schritt 5: DOM-Parsing
         if html:
@@ -1462,17 +1698,25 @@ class JobScraper:
             jobs, filtered = dom_parser.extract(html)
             if jobs:
                 logger.info(f"    → {len(jobs)} Jobs via DOM ({filtered} gefiltert)")
-                return jobs
+                return self._apply_final_filter(jobs)
         
         # Schritt 6: LLM-Fallback
         if html:
             jobs, filtered = self.llm.extract(html, company)
             if jobs:
                 logger.info(f"    → {len(jobs)} Jobs via LLM ({filtered} gefiltert)")
-                return jobs
+                return self._apply_final_filter(jobs)
         
         logger.info(f"    → Keine Jobs gefunden für {company.name}")
         return []
+    
+    def _apply_final_filter(self, jobs: List[Job]) -> List[Job]:
+        """Wendet den zentralen is_valid_job Filter auf alle extrahierten Jobs an."""
+        valid = [j for j in jobs if is_valid_job(j)]
+        rejected = len(jobs) - len(valid)
+        if rejected > 0:
+            logger.info(f"    → {rejected} False Positives herausgefiltert")
+        return valid
 
 
 # ===================== BATCH-VERARBEITUNG =====================
