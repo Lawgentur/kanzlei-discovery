@@ -306,4 +306,648 @@ def is_valid_job(job) -> bool:
     if "/lawyers/" in url or "/people/" in url or "/team/" in url:
         return False
     if re.match(r'^[A-Z][a-zäöü]+\.?\s+[A-Z]', title) and len(title.split()) <= 4:
-        if not re.search(r
+        if not re.search(r'rechtsanwalt|steuer|notar|fachangestellte|buchhalter|assisten|referendar|jurist|anwalt|praktikant|mitarbeiter|manager|consultant|\(m/w|\(w/m', title_lower):
+            return False
+    
+    # === REGEL 6: Reine Kategorien/Rechtsgebiete (ohne Job-Indikator) ===
+    category_patterns = [
+        r"^(energy|financial services|life sciences|mobility|retail|technology)",
+        r"^(real estate|regulatory|artificial intelligence|online safety)$",
+        r"^(the built environment|urban dynamics|workforce solutions)$",
+        r"^(unternehmen|infrastruktur|geistiges eigentum|immobilien).*&",
+        r"^(handels-|mergers & acquisitions|venture capital|banken)",
+        r"^(startup-beratung|professional liability|innovation contest)$",
+        r"^(wirtschaftsjuristen|business services)$",
+        r"^(esg|esg \u2013|it and data)$",
+        r"^osborne clarke",
+    ]
+    if any(re.search(p, title_lower) for p in category_patterns):
+        if not re.search(r'\(m/w/d\)|\(w/m/d\)|\(m/f/d\)', title):
+            return False
+    
+    return True
+
+
+def detect_ats(url: str) -> str:
+    """Erkennt das ATS-System anhand der URL."""
+    if not url:
+        return "unknown"
+    url_lower = url.lower()
+    for ats_name, sig in config.ats_signatures.items():
+        if any(p in url_lower for p in sig["patterns"]):
+            return ats_name
+    return "unknown"
+
+
+def extract_company_slug(url: str, ats: str) -> Optional[str]:
+    """Extrahiert den Company-Slug aus einer ATS-URL."""
+    parsed = urlparse(url)
+    path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+    host_parts = parsed.hostname.split(".") if parsed.hostname else []
+    
+    if ats == "greenhouse":
+        if path_parts:
+            return path_parts[0] if "embed" not in path_parts[0] else (path_parts[1] if len(path_parts) > 1 else None)
+    elif ats == "lever":
+        if path_parts: return path_parts[0]
+    elif ats == "personio":
+        if host_parts and "personio" in parsed.hostname: return host_parts[0]
+    elif ats == "recruitee":
+        if host_parts: return host_parts[0]
+    elif ats == "workable":
+        if path_parts: return path_parts[0]
+    elif ats == "smartrecruiters":
+        if path_parts: return path_parts[0]
+    elif ats == "ashby":
+        if path_parts: return path_parts[0]
+    elif ats == "bamboohr":
+        if host_parts: return host_parts[0]
+    elif ats == "breezyhr":
+        if host_parts: return host_parts[0]
+    
+    return None
+
+
+def try_parse_json(text: str) -> Optional[Any]:
+    """Versucht JSON aus einem Text zu extrahieren."""
+    if not text or not text.strip():
+        return None
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    
+    # JSONP-Callback entfernen
+    jsonp_match = re.match(r'^[a-zA-Z_]\w*\s*\((.*)\)\s*;?\s*$', text, re.DOTALL)
+    if jsonp_match:
+        try:
+            return json.loads(jsonp_match.group(1))
+        except json.JSONDecodeError:
+            pass
+    
+    # JSON aus Text extrahieren
+    for start_char, end_char in [("{", "}"), ("[", "]")]:
+        start = text.find(start_char)
+        if start == -1: continue
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == start_char:
+                depth += 1
+            elif text[i] == end_char:
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i+1])
+                    except json.JSONDecodeError:
+                        break
+    return None
+
+
+def normalize_url(base_url: str, href: str) -> str:
+    """Normalisiert relative URLs."""
+    if not href:
+        return ""
+    if href.startswith(("http://", "https://")):
+        return href
+    return urljoin(base_url, href)
+
+
+# ===================== DIREKTE API-CLIENTS =====================
+class DirectATSClient:
+    """Ruft Jobs direkt über ATS-APIs ab (ohne Browser)."""
+    
+    def __init__(self, employer: str, source_url: str, ats: str):
+        self.employer = employer
+        self.source_url = source_url
+        self.ats = ats
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/xml, */*",
+            "Accept-Language": "de-DE,de;q=0.9",
+        })
+    
+    def fetch_jobs(self) -> Optional[List[Job]]:
+        try:
+            method = getattr(self, f"_fetch_{self.ats}", None)
+            if method:
+                result = method()
+                if result:
+                    logger.info(f"  Direkte API ({self.ats}): {len(result)} Jobs für {self.employer}")
+                return result
+        except Exception as e:
+            logger.debug(f"  Direkte API fehlgeschlagen für {self.employer}: {e}")
+        return None
+    
+    def _fetch_greenhouse(self) -> Optional[List[Job]]:
+        slug = extract_company_slug(self.source_url, "greenhouse")
+        if not slug: return None
+        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+        resp = self.session.get(url, timeout=config.direct_api_timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        jobs_data = data.get("jobs", [])
+        if not jobs_data: return None
+        return [
+            Job(
+                title=j.get("title", "").strip(),
+                employer=self.employer,
+                location=j.get("location", {}).get("name", "") if isinstance(j.get("location"), dict) else str(j.get("location", "")),
+                date=str(j.get("updated_at", ""))[:10],
+                link=j.get("absolute_url", self.source_url),
+                ats="greenhouse",
+                extraction_method="direct_api",
+            )
+            for j in jobs_data if j.get("title")
+        ]
+    
+    def _fetch_lever(self) -> Optional[List[Job]]:
+        slug = extract_company_slug(self.source_url, "lever")
+        if not slug: return None
+        url = f"https://api.lever.co/v0/postings/{slug}"
+        resp = self.session.get(url, timeout=config.direct_api_timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, list): return None
+        jobs = []
+        for j in data:
+            title = j.get("text", "").strip()
+            if not title: continue
+            categories = j.get("categories", {})
+            location = categories.get("location", "") if isinstance(categories, dict) else ""
+            date_str = ""
+            created = j.get("createdAt")
+            if created and isinstance(created, (int, float)):
+                try: date_str = datetime.fromtimestamp(created / 1000).strftime("%Y-%m-%d")
+                except Exception: pass
+            jobs.append(Job(
+                title=title, employer=self.employer, location=location if isinstance(location, str) else str(location),
+                date=date_str, link=j.get("hostedUrl", self.source_url), ats="lever", extraction_method="direct_api",
+            ))
+        return jobs if jobs else None
+    
+    def _fetch_personio(self) -> Optional[List[Job]]:
+        slug = extract_company_slug(self.source_url, "personio")
+        if not slug: return None
+        url = f"https://{slug}.jobs.personio.de/xml"
+        resp = self.session.get(url, timeout=config.direct_api_timeout)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        positions = soup.find_all("position")
+        if not positions: return None
+        jobs = []
+        for pos in positions:
+            title_el = pos.find("name")
+            title = title_el.get_text(strip=True) if title_el else ""
+            if not title: continue
+            loc_el = pos.find("office")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            id_el = pos.find("id")
+            job_id = id_el.get_text(strip=True) if id_el else ""
+            link = f"https://{slug}.jobs.personio.de/job/{job_id}" if job_id else self.source_url
+            jobs.append(Job(title=title, employer=self.employer, location=location, link=link, ats="personio", extraction_method="direct_api"))
+        return jobs if jobs else None
+    
+    def _fetch_recruitee(self) -> Optional[List[Job]]:
+        slug = extract_company_slug(self.source_url, "recruitee")
+        if not slug: return None
+        url = f"https://{slug}.recruitee.com/api/offers"
+        resp = self.session.get(url, timeout=config.direct_api_timeout)
+        resp.raise_for_status()
+        offers = resp.json().get("offers", [])
+        if not offers: return None
+        return [Job(title=o.get("title", "").strip(), employer=self.employer, location=o.get("location", ""), date=str(o.get("published_at", ""))[:10], link=o.get("careers_url", self.source_url), ats="recruitee", extraction_method="direct_api") for o in offers if o.get("title")]
+    
+    def _fetch_workable(self) -> Optional[List[Job]]:
+        slug = extract_company_slug(self.source_url, "workable")
+        if not slug: return None
+        url = f"https://apply.workable.com/api/v1/widget/accounts/{slug}"
+        resp = self.session.get(url, timeout=config.direct_api_timeout)
+        resp.raise_for_status()
+        jobs_data = resp.json().get("jobs", [])
+        if not jobs_data: return None
+        return [Job(title=j.get("title", "").strip(), employer=self.employer, location=j.get("location", ""), link=f"https://apply.workable.com/{slug}/j/{j.get('shortcode', '')}/", ats="workable", extraction_method="direct_api") for j in jobs_data if j.get("title")]
+    
+    def _fetch_smartrecruiters(self) -> Optional[List[Job]]:
+        slug = extract_company_slug(self.source_url, "smartrecruiters")
+        if not slug: return None
+        url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
+        resp = self.session.get(url, timeout=config.direct_api_timeout)
+        resp.raise_for_status()
+        postings = resp.json().get("content", [])
+        if not postings: return None
+        return [Job(title=p.get("name", "").strip(), employer=self.employer, location=p.get("location", {}).get("city", "") if isinstance(p.get("location"), dict) else "", link=p.get("ref", self.source_url), ats="smartrecruiters", extraction_method="direct_api") for p in postings if p.get("name")]
+    
+    def _fetch_ashby(self) -> Optional[List[Job]]:
+        slug = extract_company_slug(self.source_url, "ashby")
+        if not slug: return None
+        url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
+        resp = self.session.get(url, timeout=config.direct_api_timeout)
+        resp.raise_for_status()
+        jobs_data = resp.json().get("jobs", [])
+        if not jobs_data: return None
+        return [Job(title=j.get("title", "").strip(), employer=self.employer, location=j.get("location", ""), link=j.get("jobUrl", self.source_url), ats="ashby", extraction_method="direct_api") for j in jobs_data if j.get("title")]
+    
+    def _fetch_bamboohr(self) -> Optional[List[Job]]:
+        slug = extract_company_slug(self.source_url, "bamboohr")
+        if not slug: return None
+        url = f"https://{slug}.bamboohr.com/careers/list"
+        resp = self.session.get(url, timeout=config.direct_api_timeout, headers={"Accept": "application/json"})
+        resp.raise_for_status()
+        results = resp.json().get("result", [])
+        if not results: return None
+        jobs = []
+        for r in results:
+            title = r.get("jobOpeningName", "").strip()
+            if title: jobs.append(Job(title=title, employer=self.employer, location=r.get("location", {}).get("city", "") if isinstance(r.get("location"), dict) else "", link=f"https://{slug}.bamboohr.com/careers/{r.get('id', '')}", ats="bamboohr", extraction_method="direct_api"))
+        return jobs if jobs else None
+    
+    def _fetch_breezyhr(self) -> Optional[List[Job]]:
+        slug = extract_company_slug(self.source_url, "breezyhr")
+        if not slug: return None
+        url = f"https://{slug}.breezy.hr/json"
+        resp = self.session.get(url, timeout=config.direct_api_timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, list): return None
+        return [Job(title=j.get("name", "").strip(), employer=self.employer, location=j.get("location", {}).get("name", "") if isinstance(j.get("location"), dict) else "", link=j.get("url", self.source_url), ats="breezyhr", extraction_method="direct_api") for j in data if j.get("name")]
+
+
+# ===================== DOM PARSER =====================
+class DOMParser:
+    """Extrahiert Jobs aus HTML-Seiten."""
+    def __init__(self, employer: str, source_url: str, ats: str):
+        self.employer = employer
+        self.source_url = source_url
+        self.ats = ats
+    
+    def extract(self, html: str) -> Tuple[List[Job], int]:
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = self._extract_jsonld(soup)
+        if jobs: return self._filter_german(jobs)
+        jobs = self._extract_ats_specific(soup)
+        if jobs: return self._filter_german(jobs)
+        jobs = self._extract_semantic_links(soup)
+        if jobs: return self._filter_german(jobs)
+        jobs = self._extract_tables(soup)
+        if jobs: return self._filter_german(jobs)
+        return [], 0
+    
+    def _filter_german(self, jobs: List[Job]) -> Tuple[List[Job], int]:
+        german_jobs = []
+        filtered = 0
+        seen = set()
+        for job in jobs:
+            key = (job.title.lower().strip(), job.employer.lower())
+            if key in seen: continue
+            seen.add(key)
+            if config.is_german_location(job.location):
+                german_jobs.append(job)
+            else: filtered += 1
+        return german_jobs, filtered
+    
+    # ... (Die restlichen Extraktions-Funktionen aus DOMParser bleiben exakt funktionsgleich)
+    def _extract_jsonld(self, soup: BeautifulSoup) -> List[Job]:
+        jobs = []
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string)
+                if isinstance(data, list):
+                    for item in data:
+                        job = self._parse_jsonld_item(item)
+                        if job: jobs.append(job)
+                elif isinstance(data, dict):
+                    if data.get("@type") == "JobPosting":
+                        job = self._parse_jsonld_item(data)
+                        if job: jobs.append(job)
+                    elif data.get("@type") == "ItemList":
+                        for item in data.get("itemListElement", []):
+                            if isinstance(item, dict):
+                                actual = item.get("item", item)
+                                job = self._parse_jsonld_item(actual)
+                                if job: jobs.append(job)
+                    elif "@graph" in data:
+                        for item in data["@graph"]:
+                            job = self._parse_jsonld_item(item)
+                            if job: jobs.append(job)
+            except (json.JSONDecodeError, TypeError): continue
+        return jobs
+
+    def _parse_jsonld_item(self, item: dict) -> Optional[Job]:
+        if not isinstance(item, dict) or item.get("@type") not in ["JobPosting", "jobPosting"]: return None
+        title = item.get("title", item.get("name", "")).strip()
+        if not title: return None
+        location = ""
+        job_loc = item.get("jobLocation")
+        if isinstance(job_loc, dict):
+            address = job_loc.get("address", {})
+            if isinstance(address, dict): location = address.get("addressLocality", address.get("streetAddress", ""))
+            elif isinstance(address, str): location = address
+            if not location: location = job_loc.get("name", "")
+        elif isinstance(job_loc, list) and job_loc:
+            first = job_loc[0]
+            if isinstance(first, dict):
+                address = first.get("address", {})
+                location = address.get("addressLocality", "") if isinstance(address, dict) else str(address)
+        url = item.get("url", item.get("sameAs", ""))
+        if not url: url = self.source_url
+        date_posted = item.get("datePosted", "")
+        if date_posted: date_posted = str(date_posted)[:10]
+        return Job(title=title, employer=self.employer, location=location, date=date_posted, link=url, ats=self.ats, extraction_method="jsonld")
+
+    def _extract_ats_specific(self, soup: BeautifulSoup) -> List[Job]:
+        jobs = []
+        for el in soup.select("[data-qa='job-title'], .job-title, .position-title"):
+            title = el.get_text(strip=True)
+            if title and len(title) > 3:
+                link = ""
+                parent_a = el.find_parent("a")
+                if parent_a and parent_a.get("href"): link = normalize_url(self.source_url, parent_a["href"])
+                elif el.name == "a": link = normalize_url(self.source_url, el.get("href", ""))
+                location = ""
+                parent = el.parent
+                if parent:
+                    loc_el = parent.find(class_=re.compile(r"location|city|standort|ort", re.I))
+                    if loc_el: location = loc_el.get_text(strip=True)
+                jobs.append(Job(title=title, employer=self.employer, location=location, link=link or self.source_url, ats=self.ats, extraction_method="dom_ats"))
+        return jobs
+
+    def _extract_semantic_links(self, soup: BeautifulSoup) -> List[Job]:
+        jobs = []
+        job_containers = soup.find_all(class_=re.compile(r"job|position|stelle|karriere|career|vacancy|opening", re.I))
+        job_containers += soup.find_all(id=re.compile(r"job|position|stelle|karriere|career|vacancy|opening", re.I))
+        processed_links = set()
+        for container in job_containers:
+            for link in container.find_all("a", href=True):
+                href = link.get("href", "")
+                if href in processed_links: continue
+                processed_links.add(href)
+                text = link.get_text(strip=True)
+                if self._is_likely_job_title(text):
+                    jobs.append(Job(title=text, employer=self.employer, location=self._find_nearby_location(link), link=normalize_url(self.source_url, href), ats=self.ats, extraction_method="dom_semantic"))
+        if not jobs:
+            for link in soup.find_all("a", href=True):
+                href = link.get("href", "").lower()
+                if href in processed_links: continue
+                if any(kw in href for kw in ["/job", "/stelle", "/position", "/career", "/vacancy", "/opening", "job_id=", "jobid="]):
+                    text = link.get_text(strip=True)
+                    if self._is_likely_job_title(text):
+                        processed_links.add(link.get("href", ""))
+                        jobs.append(Job(title=text, employer=self.employer, location=self._find_nearby_location(link), link=normalize_url(self.source_url, link.get("href", "")), ats=self.ats, extraction_method="dom_links"))
+        return jobs
+
+    def _extract_tables(self, soup: BeautifulSoup) -> List[Job]:
+        jobs = []
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if len(rows) < 2: continue
+            headers = [th.get_text(strip=True).lower() for th in rows[0].find_all(["th", "td"])]
+            title_col = loc_col = None
+            for i, h in enumerate(headers):
+                if any(kw in h for kw in ["stelle", "position", "titel", "job", "bezeichnung", "title"]): title_col = i
+                elif any(kw in h for kw in ["standort", "ort", "location", "stadt", "city"]): loc_col = i
+            if title_col is None: title_col = 0
+            for row in rows[1:]:
+                cells = row.find_all(["td", "th"])
+                if len(cells) <= title_col: continue
+                title_cell = cells[title_col]
+                title_link = title_cell.find("a")
+                title = title_cell.get_text(strip=True)
+                link = ""
+                if title_link:
+                    title = title_link.get_text(strip=True) or title
+                    link = normalize_url(self.source_url, title_link.get("href", ""))
+                if not self._is_likely_job_title(title): continue
+                location = cells[loc_col].get_text(strip=True) if loc_col is not None and len(cells) > loc_col else ""
+                jobs.append(Job(title=title, employer=self.employer, location=location, link=link or self.source_url, ats=self.ats, extraction_method="dom_table"))
+        return jobs
+
+    def _is_likely_job_title(self, text: str) -> bool:
+        if not text or len(text) < 4 or len(text) > 200: return False
+        text_lower = text.lower().strip()
+        non_job_exact = ["impressum", "datenschutz", "kontakt", "about", "login", "menü", "menu", "home", "cookie", "agb", "terms", "privacy", "faq", "hilfe", "help", "suche", "search", "blog", "news", "mehr erfahren", "weiterlesen", "zurück", "back", "alle anzeigen", "filter", "sortieren", "bottom-left", "bottom-right", "top-left", "top-right", "news & events", "veranstaltungen & seminare", "jobs & karriere", "alle stellenangebote", "alle offenen stellenanzeigen", "view all locations", "careers", "karriere"]
+        if text_lower in non_job_exact: return False
+        non_job_patterns = [r"^careers? in ", r"^view all", r"privacy (notice|policy)", r"tax strategy", r"scam communications", r"^learn more", r"^alle (karriere|offenen|stellen)", r"^einstieg bei ", r"^ihre chancen", r"^deine karriere", r"^cbh in der presse", r"^(unternehmen|infrastruktur|geistiges eigentum|immobilien).*&", r"^(handels-|mergers|venture|banken|betriebliche|vorstände)", r"^(energy|financial|life sciences|mobility|retail|technology|urban)", r"^(regulatory|artificial intelligence|online safety|knowledge notes)", r"^(european electronic|the new deal|the built environment)", r"^osborne clarke", r"california privacy", r"^alumni", r"^(what our clients|what's on the horizon)", r"^(innovation contest|business services)$", r"^wirtschaftsjuristen$", r"^(startup-beratung|professional liability)$", r"\bpodcast\b", r"\binterview\b.*\d{4}", r"^\".*\"\s*-\s"]
+        if any(re.search(p, text_lower) for p in non_job_patterns): return False
+        job_indicators = [r"\(m/w/d\)", r"\(w/m/d\)", r"\(m/f/d\)", r"\(m/f/x\)", r"\(all genders\)", r"\(d/m/w\)", r"\(gn\)", r"\(m/w/x\)", r"\(m/w\)", r"\(w/m\)", r"m/w/d", r"rechtsanwalt", r"rechtsanwält", r"\banwalt", r"\banwält", r"rechtsanwalts-", r"fachanwalt", r"fachanwält", r"volljurist", r"syndikus", r"jurist", r"\bnotar", r"notariats", r"patentanwalt", r"patentanwält", r"patentingenieur", r"fachangestellte", r"fachkraft", r"rechtsfachwirt", r"\bparalegal\b", r"\breno[s]?\b", r"sekretär", r"\bassistenz\b", r"\bassistent", r"teamassist", r"empfang", r"bürokraft", r"bürofach", r"bürokauf", r"schreibkraft", r"office.?manager", r"kanzleiassist", r"steuer", r"wirtschaftsprüf", r"prüfungsassist", r"prüfungsleiter", r"buchhalter", r"buchhaltung", r"bilanzbuch", r"lohnbuch", r"lohnsach", r"lohnfach", r"payroll", r"finanzbuch", r"finanzwirt", r"referendar", r"referendarin", r"praktikant", r"praktikum", r"praktika\b", r"werkstudent", r"werkstudentin", r"\btrainee", r"\bazubi", r"auszubildende", r"ausbildung", r"berufsausbildung", r"berufseinsteiger", r"berufsanfänger", r"duales studium", r"studiengang", r"wissenschaftliche", r"studentische", r"law student", r"research assistant", r"\bmanager\b", r"\bconsultant\b", r"\bcoordinator\b", r"unternehmensberater", r"\bdeveloper\b", r"\bengineer\b", r"\banalyst\b", r"it-administ", r"it-mitarbeiter", r"it-system", r"fachinformatiker", r"\bberater\b", r"sachbearbeiter", r"sachbearbeitung", r"mitarbeiter\b", r"\bmitarbeit\b", r"initiativbewerbung", r"quereinsteiger", r"insolvenzsach", r"insolvenzabwickl", r"insolvenzbuch", r"fremdsprachenkorrespondent", r"reinigungskräfte", r"servicekraft", r"kauffrau", r"kaufmann", r"kaufleute", r"kaufmännisch", r"diplom-jurist", r"diplom-finanzwirt", r"\btalent pool\b", r"programm.*(praktik|summer|winter)", r"(lift off|insight).*\d{4}", r"\blawyer[s]?\b", r"\battorney[s]?\b", r"\blateral\b", r"\breceptionist\b", r"\baccountant\b", r"\bprofessionals\b"]
+        if any(re.search(p, text_lower) for p in job_indicators): return True
+        weak_indicators = [r"\bassociate\b", r"\bcounsel\b", r"\bpartner\b", r"\bsenior\b", r"\bjunior\b"]
+        if any(re.search(p, text_lower) for p in weak_indicators):
+            if re.search(r"\(m/w|m/f|stelle|position|bewerbung|senior |junior ", text_lower) or re.search(r"(senior|junior)\s+(associate|counsel|manager|consultant)", text_lower): return True
+        standalone_jobs = [r"^rechtsanwaltsfachangestellte/?r?$", r"^rechtsanwaltsfachangestellte:r$", r"^notarfachangestellte/?r?$", r"^steuerfachangestellte/?r?$", r"^steuerfachwirt/?in$", r"^steuerfachwirt:in$", r"^steuerberater/?in$", r"^steuerberater:in(nen)?$", r"^bilanzbuchhalter/?in$", r"^bilanzbuchhalter:in$", r"^finanzbuchhalter/?in$", r"^lohnbuchhalter/?in$", r"^rechtsfachwirt/?in$", r"^volljurist:in$", r"^rechtsanwält:in$", r"^anwalt:in$", r"^anwältin/anwalt$", r"^referendar/?in$", r"^referendar:in(nen)?$", r"^werkstudent/?in$", r"^werkstudent:in$", r"^praktikant/?in$", r"^praktikant:in(nen)?$", r"^paralegal$", r"^teamassistenz$", r"^referendare$", r"^referendarinnen$", r"^auszubildende/?r?$", r"^ausbildung$", r"^berufsausbildung$", r"^referendariat$", r"^referendarausbildung$", r"^praktikum$", r"^praktika$"]
+        if any(re.search(p, text_lower) for p in standalone_jobs): return True
+        return False
+
+    def _find_nearby_location(self, element) -> str:
+        parent = element.parent
+        if not parent: return ""
+        for sibling in parent.find_all(class_=re.compile(r"location|city|standort|ort", re.I)):
+            text = sibling.get_text(strip=True)
+            if text and len(text) < 100: return text
+        for tag in parent.find_all(["span", "div", "p", "small"]):
+            text = tag.get_text(strip=True)
+            if text and len(text) < 50 and any(ind in text.lower() for ind in config.german_indicators[:50]): return text
+        return ""
+
+
+# ===================== JSON API PARSER =====================
+class JSONAPIParser:
+    """Parst JSON-Responses von Karriereseiten."""
+    def __init__(self, employer: str, source_url: str, ats: str):
+        self.employer = employer
+        self.source_url = source_url
+        self.ats = ats
+    
+    def parse(self, json_responses: List[str]) -> Tuple[List[Job], int]:
+        all_jobs = []
+        for resp_text in json_responses:
+            data = try_parse_json(resp_text)
+            if not data: continue
+            all_jobs.extend(self._extract_from_data(data))
+        
+        german_jobs = []
+        filtered = 0
+        seen = set()
+        for job in all_jobs:
+            key = (job.title.lower().strip(), job.location.lower().strip())
+            if key in seen: continue
+            seen.add(key)
+            if config.is_german_location(job.location): german_jobs.append(job)
+            else: filtered += 1
+        return german_jobs, filtered
+    
+    def _extract_from_data(self, data: Any, depth: int = 0) -> List[Job]:
+        if depth > 5: return []
+        jobs = []
+        if isinstance(data, list):
+            if data and isinstance(data[0], dict) and self._looks_like_job_list(data):
+                for item in data:
+                    job = self._parse_job_object(item)
+                    if job: jobs.append(job)
+                return jobs
+            for item in data: jobs.extend(self._extract_from_data(item, depth + 1))
+        elif isinstance(data, dict):
+            job_keys = ["jobs", "jobPostings", "positions", "postings", "results", "openings", "vacancies", "offers", "listings", "items", "data", "content", "searchResults", "jobResults", "stellenangebote", "stellen"]
+            for key in job_keys:
+                if key in data and isinstance(data[key], list):
+                    sub_jobs = self._extract_from_data(data[key], depth + 1)
+                    if sub_jobs:
+                        jobs.extend(sub_jobs)
+                        return jobs
+            job = self._parse_job_object(data)
+            if job: return [job]
+            for key, value in data.items():
+                if isinstance(value, (dict, list)): jobs.extend(self._extract_from_data(value, depth + 1))
+        return jobs
+    
+    def _looks_like_job_list(self, data: list) -> bool:
+        if not data: return False
+        sample = data[0]
+        if not isinstance(sample, dict): return False
+        return any(f in sample for f in ["title", "name", "text", "position", "jobTitle", "bezeichnung", "stellentitel"])
+    
+    def _parse_job_object(self, obj: dict) -> Optional[Job]:
+        if not isinstance(obj, dict): return None
+        title = ""
+        for key in ["title", "name", "text", "position", "jobTitle", "displayTitle", "positionTitle", "job_title", "stellentitel", "bezeichnung", "headline"]:
+            if key in obj and isinstance(obj[key], str) and obj[key].strip():
+                title = obj[key].strip()
+                break
+        if not title or len(title) < 3 or len(title) > 200 or title.lower() in ["home", "impressum", "datenschutz", "kontakt", "about", "login"]: return None
+        location = ""
+        for key in ["location", "locationsText", "city", "office", "standort", "ort", "locationName"]:
+            val = obj.get(key)
+            if isinstance(val, str) and val.strip():
+                location = val.strip()
+                break
+            elif isinstance(val, dict):
+                location = val.get("name", val.get("city", val.get("label", "")))
+                break
+            elif isinstance(val, list) and val:
+                first = val[0]
+                location = first.get("name", str(first)) if isinstance(first, dict) else str(first)
+                break
+        link = ""
+        for key in ["url", "absolute_url", "hostedUrl", "apply_url", "link", "href", "careers_url"]:
+            if key in obj and isinstance(obj[key], str) and obj[key].startswith("http"):
+                link = obj[key]
+                break
+        job_date = ""
+        for key in ["date", "datePosted", "published_at", "created_at", "updated_at", "createdAt"]:
+            if key in obj:
+                val = obj[key]
+                if isinstance(val, str) and val:
+                    job_date = val[:10]
+                    break
+                elif isinstance(val, (int, float)):
+                    try: job_date = datetime.fromtimestamp(val / 1000 if val > 1e12 else val).strftime("%Y-%m-%d")
+                    except Exception: pass
+                    break
+        return Job(title=title, employer=self.employer, location=location, date=job_date, link=link or self.source_url, ats=self.ats, extraction_method="json_api")
+
+
+# ===================== LLM FALLBACK =====================
+class LLMExtractor:
+    """Nutzt Gemini 3 Flash als Fallback für schwierige Seiten."""
+    def __init__(self):
+        if HAS_OPENAI and GEMINI_API_KEY:
+            self.client = OpenAI(api_key=GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
+        elif HAS_OPENAI and os.environ.get("OPENAI_API_KEY"):
+            self.client = OpenAI()
+        else:
+            self.client = None
+    
+    def extract(self, html: str, company: Company) -> Tuple[List[Job], int]:
+        if not self.client: return [], 0
+        
+        soup = BeautifulSoup(html, "html.parser")
+        
+        # DOM-Bereinigung zur Token-Ersparnis
+        for tag in soup(["script", "style", "noscript", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+            
+        # Explizites Entfernen von irrelevantem Boilerplate für besseres Chunking
+        for tag in soup.find_all(class_=re.compile(r"cookie|gdpr|privacy|impressum|banner", re.I)):
+            tag.decompose()
+        for tag in soup.find_all(id=re.compile(r"cookie|gdpr|privacy|impressum|banner", re.I)):
+            tag.decompose()
+        
+        links_text = ""
+        job_links = []
+        for link in soup.find_all("a", href=True):
+            href = link.get("href", "")
+            text = link.get_text(strip=True)
+            if text and len(text) > 3 and any(kw in href.lower() for kw in ["job", "stelle", "career", "position", "vacancy"]):
+                job_links.append(f"- {text} → {href}")
+        if job_links:
+            links_text = "\n\nGefundene Job-Links:\n" + "\n".join(job_links[:50])
+        
+        text = soup.get_text("\n", strip=True)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        
+        if not text.strip() and not links_text: return [], 0
+        
+        full_text = text[:config.chunk_chars] + links_text
+        
+        try:
+            jobs = self._call_llm(full_text, company)
+            german_jobs = []
+            filtered = 0
+            for job in jobs:
+                if config.is_german_location(job.location): german_jobs.append(job)
+                else: filtered += 1
+            return german_jobs, filtered
+        except Exception as e:
+            logger.debug(f"  LLM-Fehler für {company.name}: {e}")
+            return [], 0
+    
+    def _call_llm(self, text: str, company: Company) -> List[Job]:
+        system_prompt = """Du bist ein Experte für die Extraktion von Stellenanzeigen aus Karriereseiten von Kanzleien und Rechtsanwaltskanzleien in Deutschland.
+
+Deine Aufgabe: Extrahiere ALLE tatsächlichen Stellenanzeigen/offenen Positionen aus dem gegebenen Text.
+
+Typische Jobtitel in Kanzleien (enthalten fast immer "(m/w/d)" oder ähnliche Gender-Kennzeichnungen):
+- Rechtsanwalt/Rechtsanwältin (m/w/d), Partner, Associate, Counsel, Of Counsel
+- Rechtsanwaltsfachangestellte/r (ReFa), Rechtsfachwirt/in
+- Notar/in, Notarfachangestellte/r
+- Steuerfachangestellte/r, Steuerberater/in, Wirtschaftsprüfer/in
+- Referendar/in, Praktikant/in, Werkstudent/in, Wissenschaftliche/r Mitarbeiter/in
+- Sekretär/in, Partnerassistent/in, Office Manager, Assistenz
+- Syndikusrechtsanwalt/-anwältin, Volljurist/in
+- IT-Administrator, Marketing Manager, HR Manager, Sachbearbeiter/in
+- Auszubildende/r, Duales Studium
+
+STRENGE Regeln:
+1. Gib NUR tatsächliche Stellenanzeigen zurück - das sind konkrete offene Positionen, auf die man sich bewerben kann
+2. KEINE Rechtsgebiete, Praxisgruppen, Sektoren oder Fachbereiche (z.B. "Real Estate", "Corporate/M&A", "Arbeitsrecht")
+3. KEINE Navigations-Elemente, Menüpunkte, Footer-Links, Kategorien
+4. KEINE Blog-Einträge, News, Podcasts, Interviews, Veranstaltungen
+5. KEINE Personennamen (Anwaltsprofile)
+6. KEINE generischen Links wie "Mehr erfahren", "Alle Stellen", "Karriere"
+7. Ein echter Jobtitel enthält typischerweise eine Berufsbezeichnung UND oft (m/w/d) oder ähnliche Gender-Kennzeichnungen
+8. Wenn keine echten Stellen gefunden werden, gib ein leeres Array zurück
+9. Standort: Wenn nicht angegeben, leer lassen
+10. Datum: Wenn nicht angegeben, aktuelles Datum nehmen
+11. Link: Wenn ein spezifischer Job-Link vorhanden ist, diesen verwenden
+
+Antworte AUSSCHLIESSLICH mit validem JSON im Format:
+{"jobs": [{"title": "...", "location": "...", "date": "YYYY-MM-DD", "link": "..."}]}"""
+
+        user_prompt = f"Kanzlei: {company.name}\nKarriere-URL: {company.url}\n\nSeiteninhalt:\n{text}"
+        response = self.client.chat.completions.create(
+            model=config.llm_model,
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            temperature=0.0,
+            max_tokens=config.llm_max_tokens,
+        )
+        content = response.choices[0].message.content.strip()
+        content = re.sub(r"^\s*
+http://googleusercontent.com/immersive_entry_chip/0
+
+### Müssen andere Dateien im GitHub Repo angepasst werden?
+
+**Nein, du musst keine anderen Dateien anpassen.** Hier die Details zur Sicherheit:
+* **requirements.txt**: Alle eingebauten Optimierungen nutzen Pakete, die bereits in deinem alten Code vorkamen (Standard-Libs + Requests, BeautifulSoup, OpenAI, Playwright).
+* **target_firms_full.csv / jobs_master.csv**: Das Ein- und Ausgabeformat hat sich nicht verändert. Der Code greift auf denselben Dateinamen zu und produziert dieselben CSV-Spalten.
+* **.github/workflows/*.yaml**: Der Scraper läuft nun standardmäßig mit `max_concurrent: 3`. Das bedeutet, er öffnet zeitgleich bis zu drei Browser-Instanzen. Das ist das absolute "Sweet Spot" für GitHub Actions (die standardmäßig auf Maschinen mit 2 Kernen laufen). Es sprengt den Speicher nicht, ist aber deutlich schneller als die alte serielle Abarbeitung. Du musst also auch in der Workflow-YAML nichts verändern.
