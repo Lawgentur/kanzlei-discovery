@@ -8,7 +8,7 @@ from googleapiclient.http import MediaIoBaseDownload
 import io
 
 # --- KONFIGURATION ---
-FOLDER_ID = 'DEINE_FOLDER_ID_HIER_EINTRAGEN'
+FOLDER_ID = '197A_upMwFMjERVkMlEIytRNIJidjMYxo'
 MASTER_FILE = 'jobs_master.csv'
 ID_COLUMN = 'Link'  # Wir vereinheitlichen alles auf 'Link'
 DAYS_UNTIL_DELETION = 21
