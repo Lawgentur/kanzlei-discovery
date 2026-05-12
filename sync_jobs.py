@@ -10,7 +10,7 @@ import io
 # --- KONFIGURATION ---
 FOLDER_ID = '197A_upMwFMjERVkMlEIytRNIJidjMYxo' 
 MASTER_FILE = 'jobs_master.csv'
-DAYS_UNTIL_DELETION = 30 
+DAYS_UNTIL_DELETION = 9999
 
 # Spalten-Mapping
 MAPPINGS = {
