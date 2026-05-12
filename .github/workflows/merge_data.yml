@@ -1,0 +1,34 @@
+name: Sync Jobs from Google Drive
+on:
+  schedule:
+    - cron: '0 2 * * *' # Läuft jede Nacht um 2:00 Uhr
+  workflow_dispatch: # Erlaubt manuelles Starten per Klick
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install pandas openpyxl google-api-python-client google-auth
+
+      - name: Run Sync Script
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+        run: python sync_jobs.py
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name 'Job-Bot'
+          git config --global user.email 'bot@lawgentur.de'
+          git add jobs_master.csv
+          git commit -m "Automatisches Update der Jobs" || exit 0
+          git push
