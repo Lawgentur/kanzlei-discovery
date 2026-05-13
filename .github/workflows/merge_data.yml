@@ -1,34 +1,82 @@
 name: Sync Jobs from Google Drive
+
 on:
   schedule:
-    - cron: '0 2 * * *' # Läuft jede Nacht um 2:00 Uhr
-  workflow_dispatch: # Erlaubt manuelles Starten per Klick
+    - cron: '0 6 * * *'   # Täglich 06:00 UTC (Sonntag ~08:00 Uhr deutscher Zeit)
+  workflow_dispatch:        # Manuelles Starten per Klick möglich
+
+# Verhindert parallele Runs, die eine Race Condition auf jobs_master.csv erzeugen würden.
+# Ein laufender Job wird abgeschlossen, ein gestarteter aber wartender abgebrochen.
+concurrency:
+  group: sync-jobs
+  cancel-in-progress: false
 
 jobs:
-  build:
+  sync:
+    name: Sync & Deploy Jobs
     runs-on: ubuntu-latest
+
+    # Ohne diesen Block schlägt git push in modernen GitHub Actions fehl.
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
+          cache: 'pip'          # Pakete werden gecacht → spart ~30s pro Run
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
+          pip install --upgrade pip
           pip install pandas openpyxl google-api-python-client google-auth
 
-      - name: Run Sync Script
+      - name: Run Sync-Bot
+        id: sync_script
         env:
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-        run: python sync_jobs.py
-
-      - name: Commit and Push
+          DRIVE_FOLDER_ID:         ${{ secrets.DRIVE_FOLDER_ID }}
+          DAYS_UNTIL_DELETION:     '30'
         run: |
-          git config --global user.name 'Job-Bot'
+          # Script ausgeben und gleichzeitig in Logfile schreiben
+          python sync_jobs.py | tee sync_output.log
+
+          # Commit-Message aus Script-Output extrahieren (letzte COMMIT_MSG= Zeile)
+          MSG=$(grep "^COMMIT_MSG=" sync_output.log | tail -1 | cut -d= -f2-)
+          echo "commit_msg=${MSG}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name  'Lawgentur Bot'
           git config --global user.email 'bot@lawgentur.de'
-          git add jobs_master.csv
-          git commit -m "Automatisches Update der Jobs" || exit 0
-          git push
+
+          # Alle relevanten Dateien stagen
+          git add jobs_master.csv sync_state.json
+
+          # Nur committen wenn sich wirklich etwas geändert hat
+          if git diff --staged --quiet; then
+            echo "Keine Änderungen – kein Commit nötig."
+          else
+            MSG="${{ steps.sync_script.outputs.commit_msg }}"
+            # Fallback-Message wenn Script keinen Output lieferte
+            if [ -z "$MSG" ]; then
+              MSG="Automatisches Jobs-Update $(date +%Y-%m-%d)"
+            fi
+            git commit -m "🤖 $MSG"
+            git push
+            echo "✅ Änderungen gepusht."
+          fi
+
+      # Optionaler Schritt: Bei Fehlern eine E-Mail / Slack-Nachricht senden.
+      # Aktivieren durch Entfernen des '#' und Setzen des Secrets SLACK_WEBHOOK_URL.
+      # - name: Notify on failure
+      #   if: failure()
+      #   uses: slackapi/slack-github-action@v1.26.0
+      #   with:
+      #     payload: '{"text":"⚠️ Lawgentur Sync-Bot fehlgeschlagen! Bitte GitHub Actions prüfen."}'
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
