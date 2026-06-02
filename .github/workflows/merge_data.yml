@@ -1,22 +1,31 @@
-name: Sync Jobs from Google Drive
+name: Kanzlei Discovery Pipeline
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # Täglich 06:00 UTC (Sonntag ~08:00 Uhr deutscher Zeit)
-  workflow_dispatch:        # Manuelles Starten per Klick möglich
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      scrape:
+        description: "Scrape target firm career pages after Drive sync"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      limit:
+        description: "Optional firm limit for smoke tests"
+        required: false
+        default: ""
 
-# Verhindert parallele Runs, die eine Race Condition auf jobs_master.csv erzeugen würden.
-# Ein laufender Job wird abgeschlossen, ein gestarteter aber wartender abgebrochen.
 concurrency:
-  group: sync-jobs
+  group: kanzlei-discovery
   cancel-in-progress: false
 
 jobs:
-  sync:
-    name: Sync & Deploy Jobs
+  pipeline:
+    name: Sync, Scrape, Export
     runs-on: ubuntu-latest
-
-    # Ohne diesen Block schlägt git push in modernen GitHub Actions fehl.
     permissions:
       contents: write
 
@@ -27,56 +36,46 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'          # Pakete werden gecacht → spart ~30s pro Run
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install pandas openpyxl google-api-python-client google-auth
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
-      - name: Run Sync-Bot
-        id: sync_script
+      - name: Run pipeline
+        id: pipeline
         env:
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-          DRIVE_FOLDER_ID:         ${{ secrets.DRIVE_FOLDER_ID }}
-          DAYS_UNTIL_DELETION:     '30'
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          DAYS_UNTIL_DELETION: "30"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # Script ausgeben und gleichzeitig in Logfile schreiben
-          python sync_jobs.py | tee sync_output.log
-
-          # Commit-Message aus Script-Output extrahieren (letzte COMMIT_MSG= Zeile)
-          MSG=$(grep "^COMMIT_MSG=" sync_output.log | tail -1 | cut -d= -f2-)
+          ARGS=""
+          if [ "${{ github.event.inputs.scrape }}" = "true" ]; then
+            ARGS="$ARGS --scrape"
+          fi
+          if [ -n "${{ github.event.inputs.limit }}" ]; then
+            ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
+          fi
+          kanzlei-discovery $ARGS | tee pipeline_output.log
+          MSG=$(grep "^COMMIT_MSG=" pipeline_output.log | tail -1 | cut -d= -f2-)
           echo "commit_msg=${MSG}" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push changes
         run: |
-          git config --global user.name  'Lawgentur Bot'
-          git config --global user.email 'bot@lawgentur.de'
-
-          # Alle relevanten Dateien stagen
-          git add jobs_master.csv sync_state.json
-
-          # Nur committen wenn sich wirklich etwas geändert hat
+          git config --global user.name "Lawgentur Bot"
+          git config --global user.email "bot@lawgentur.de"
+          git add jobs_master.csv target_firms_full.csv sync_state.json media/jobs_master_public.csv
           if git diff --staged --quiet; then
-            echo "Keine Änderungen – kein Commit nötig."
+            echo "No changes to commit."
           else
-            MSG="${{ steps.sync_script.outputs.commit_msg }}"
-            # Fallback-Message wenn Script keinen Output lieferte
+            MSG="${{ steps.pipeline.outputs.commit_msg }}"
             if [ -z "$MSG" ]; then
               MSG="Automatisches Jobs-Update $(date +%Y-%m-%d)"
             fi
-            git commit -m "🤖 $MSG"
+            git commit -m "$MSG"
             git push
-            echo "✅ Änderungen gepusht."
           fi
 
-      # Optionaler Schritt: Bei Fehlern eine E-Mail / Slack-Nachricht senden.
-      # Aktivieren durch Entfernen des '#' und Setzen des Secrets SLACK_WEBHOOK_URL.
-      # - name: Notify on failure
-      #   if: failure()
-      #   uses: slackapi/slack-github-action@v1.26.0
-      #   with:
-      #     payload: '{"text":"⚠️ Lawgentur Sync-Bot fehlgeschlagen! Bitte GitHub Actions prüfen."}'
-      #   env:
-      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

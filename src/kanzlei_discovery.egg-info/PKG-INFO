@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: kanzlei-discovery
+Version: 0.1.0
+Summary: Pipeline for discovering, normalizing, and exporting German law firm job postings.
+Requires-Python: >=3.11
+Requires-Dist: beautifulsoup4>=4.11.0
+Requires-Dist: google-api-python-client>=2.100.0
+Requires-Dist: google-auth>=2.20.0
+Requires-Dist: openai>=1.0.0
+Requires-Dist: openpyxl>=3.1.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: requests>=2.28.0
+Provides-Extra: test
+Requires-Dist: pytest>=8.0.0; extra == "test"

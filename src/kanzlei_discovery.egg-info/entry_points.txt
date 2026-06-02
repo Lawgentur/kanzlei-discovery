@@ -1,0 +1,2 @@
+[console_scripts]
+kanzlei-discovery = kanzlei_discovery.cli:main
