@@ -16,6 +16,8 @@ REJECT_EXACT = {
     "alle jobs",
     "alle offenen stellenanzeigen",
     "alle stellenangebote",
+    "anwälte",
+    "anwaltwerden.de",
     "back",
     "blog",
     "careers",
@@ -34,6 +36,7 @@ REJECT_EXACT = {
     "menü",
     "news",
     "news & events",
+    "notariat",
     "privacy",
     "search",
     "suche",
@@ -56,6 +59,21 @@ REJECT_PATTERNS = [
     r"\binterview\b.*\d{4}",
     r"^\".*\"\s*-\s",
     r"^cbh in der presse",
+    r"^©",
+    r"copyright",
+    r"^kontakt fragen",
+    r"fachanwalt f.*miet- und wohnungseigentumsrecht",
+    r"master of ms office",
+    r"rechtsanwalt rechtsanw.*steuerberater in kooperation",
+    r"rechtsanwaltsvergütungsgesetz",
+    r"r.*ckforderung wertzuwachssteuer",
+    r"sozialleistungs.*beratung und vertretung",
+    r"sozialversicherungs.*beratung und vertretung",
+    r"strafrecht.*rechtsanwalt als verteidiger",
+    r"verordnung .*notarieller akten",
+    r"notare in köln$",
+    r"^search lawyers practices",
+    r"^anw[aä]lte kompetenzen",
 ]
 
 NON_JOB_URL_SEGMENTS = [
@@ -92,7 +110,6 @@ JOB_HINTS = [
     "manager",
     "mitarbeiter",
     "notar",
-    "office",
     "paralegal",
     "patent",
     "praktik",
@@ -123,7 +140,7 @@ JOB_MARKERS = [
 
 def repair_text(value: str) -> str:
     text = str(value or "").strip()
-    if not any(marker in text for marker in ("Ã", "Â", "â€", "â†", "ðŸ")):
+    if not any(marker in text for marker in ("Ã", "Â", "â", "ðŸ")):
         return text
     try:
         repaired = text.encode("latin1").decode("utf-8")

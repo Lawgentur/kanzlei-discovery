@@ -111,12 +111,13 @@ def extract_dom_jobs(html: str, firm: Firm, base_url: str) -> list[Job]:
     jobs: list[Job] = []
     seen: set[str] = set()
 
-    for tag in soup.find_all(["a", "h2", "h3", "li", "td", "div"], limit=2000):
-        link_tag = tag if tag.name == "a" else tag.find("a", href=True)
-        href = normalize_url(base_url, link_tag.get("href", "")) if link_tag else base_url
+    for tag in soup.find_all("a", href=True, limit=2000):
+        href = normalize_url(base_url, tag.get("href", ""))
         text = tag.get_text(" ", strip=True)
         text = re.sub(r"\s+", " ", text)
         if not text or (href, text.lower()) in seen:
+            continue
+        if len(text.split()) > 18:
             continue
         if is_likely_job_title(text, href):
             seen.add((href, text.lower()))
@@ -144,8 +145,8 @@ def extract_json_jobs(payload: Any, firm: Firm, base_url: str, depth: int = 0) -
 
 
 def extract_llm_jobs(html: str, firm: Firm, base_url: str) -> list[Job]:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    providers = configured_llm_providers()
+    if not providers:
         return []
     try:
         from openai import OpenAI
@@ -159,39 +160,68 @@ def extract_llm_jobs(html: str, firm: Firm, base_url: str) -> list[Job]:
     if not text:
         return []
 
-    base_url_arg = "https://generativelanguage.googleapis.com/v1beta/openai/" if os.getenv("GEMINI_API_KEY") else None
-    client = OpenAI(api_key=api_key, base_url=base_url_arg) if base_url_arg else OpenAI(api_key=api_key)
-    model = os.getenv("LLM_MODEL", "gemini-3-flash-preview" if base_url_arg else "gpt-4.1-mini")
-    response = client.chat.completions.create(
-        model=model,
-        temperature=0,
-        max_tokens=2500,
-        messages=[
+    for provider in providers:
+        try:
+            client = OpenAI(api_key=provider["api_key"], base_url=provider["base_url"]) if provider["base_url"] else OpenAI(api_key=provider["api_key"])
+            response = client.chat.completions.create(
+                model=provider["model"],
+                temperature=0,
+                max_tokens=2500,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extrahiere nur echte offene Stellenanzeigen von Kanzleiseiten. "
+                            "Keine Navigation, Rechtsgebiete, News, Anwaltsprofile oder generische Karrieretexte. "
+                            "Antworte ausschliesslich als JSON: "
+                            '{"jobs":[{"title":"","location":"","link":""}]}'
+                        ),
+                    },
+                    {"role": "user", "content": f"Kanzlei: {firm.name}\nURL: {base_url}\n\n{text}"},
+                ],
+            )
+            content = response.choices[0].message.content or "{}"
+            match = re.search(r"\{.*\}", content, re.S)
+            data = json.loads(match.group(0) if match else content)
+            return [
+                Job(
+                    title=item.get("title", ""),
+                    link=normalize_url(base_url, item.get("link", "")) or base_url,
+                    firm=firm.name,
+                    city=item.get("location", ""),
+                    source=provider["source"],
+                )
+                for item in data.get("jobs", [])
+                if isinstance(item, dict)
+            ]
+        except Exception:
+            continue
+    return []
+
+
+def configured_llm_providers() -> list[dict[str, str | None]]:
+    providers: list[dict[str, str | None]] = []
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if openai_key:
+        providers.append(
             {
-                "role": "system",
-                "content": (
-                    "Extrahiere nur echte offene Stellenanzeigen von Kanzleiseiten. "
-                    "Antworte ausschliesslich als JSON: "
-                    '{"jobs":[{"title":"","location":"","link":""}]}'
-                ),
-            },
-            {"role": "user", "content": f"Kanzlei: {firm.name}\nURL: {base_url}\n\n{text}"},
-        ],
-    )
-    content = response.choices[0].message.content or "{}"
-    match = re.search(r"\{.*\}", content, re.S)
-    data = json.loads(match.group(0) if match else content)
-    return [
-        Job(
-            title=item.get("title", ""),
-            link=normalize_url(base_url, item.get("link", "")) or base_url,
-            firm=firm.name,
-            city=item.get("location", ""),
-            source="llm",
+                "api_key": openai_key,
+                "base_url": os.getenv("OPENAI_BASE_URL") or None,
+                "model": os.getenv("OPENAI_LLM_MODEL", os.getenv("LLM_MODEL", "gpt-4.1-mini")),
+                "source": "llm:gpt",
+            }
         )
-        for item in data.get("jobs", [])
-        if isinstance(item, dict)
-    ]
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if gemini_key:
+        providers.append(
+            {
+                "api_key": gemini_key,
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                "model": os.getenv("GEMINI_LLM_MODEL", "gemini-3-flash-preview"),
+                "source": "llm:gemini",
+            }
+        )
+    return providers
 
 
 def parse_embedded_json_jobs(html: str, firm: Firm, base_url: str) -> list[Job]:
@@ -264,4 +294,3 @@ def find_nearby_location(tag: Any) -> str:
 def _tag_text(parent: Any, name: str) -> str:
     tag = parent.find(name)
     return tag.get_text(" ", strip=True) if tag else ""
-
