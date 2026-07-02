@@ -1,3 +1,5 @@
+from kanzlei_discovery.extractors import parse_embedded_json_jobs
+from kanzlei_discovery.models import Firm
 from kanzlei_discovery.quality import canonical_link, is_likely_job_title, normalize_job_row
 
 
@@ -35,3 +37,8 @@ def test_trusted_board_sources_accept_official_board_titles():
     }
     normalized = normalize_job_row(row, "2026-06-19")
     assert normalized["Titel"] == "Facility Specialist"
+
+
+def test_embedded_json_parser_ignores_broken_html_charrefs():
+    html = '<div class="aditem-main--top--left">&#8203Baden</div>'
+    assert parse_embedded_json_jobs(html, Firm("Test"), "https://example.com/jobs") == []

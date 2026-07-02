@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import warnings
 from datetime import datetime
 from typing import Any
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 from .ats import detect_ats, extract_slug
 from .models import Firm, Job
@@ -80,7 +81,9 @@ class DirectATSClient:
         if not slug:
             return []
         xml = self.session.get(f"https://{slug}.jobs.personio.de/xml", timeout=self.timeout).text
-        soup = BeautifulSoup(xml, "html.parser")
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+            soup = BeautifulSoup(xml, "html.parser")
         jobs = []
         for position in soup.find_all("position"):
             title = _tag_text(position, "name")
@@ -107,7 +110,9 @@ class DirectATSClient:
 
 
 def extract_dom_jobs(html: str, firm: Firm, base_url: str) -> list[Job]:
-    soup = BeautifulSoup(html, "html.parser")
+    soup = parse_html_safely(html)
+    if not soup:
+        return []
     jobs: list[Job] = []
     seen: set[str] = set()
 
@@ -153,7 +158,9 @@ def extract_llm_jobs(html: str, firm: Firm, base_url: str) -> list[Job]:
     except ImportError:
         return []
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = parse_html_safely(html)
+    if not soup:
+        return []
     for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
         tag.decompose()
     text = soup.get_text("\n", strip=True)[:12000]
@@ -225,7 +232,9 @@ def configured_llm_providers() -> list[dict[str, str | None]]:
 
 
 def parse_embedded_json_jobs(html: str, firm: Firm, base_url: str) -> list[Job]:
-    soup = BeautifulSoup(html, "html.parser")
+    soup = parse_html_safely(html)
+    if not soup:
+        return []
     jobs: list[Job] = []
     for script in soup.find_all("script", type=re.compile("json", re.I)):
         try:
@@ -234,6 +243,15 @@ def parse_embedded_json_jobs(html: str, firm: Firm, base_url: str) -> list[Job]:
             continue
         jobs.extend(extract_json_jobs(payload, firm, base_url))
     return jobs
+
+
+def parse_html_safely(html: str) -> BeautifulSoup | None:
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+            return BeautifulSoup(html or "", "html.parser")
+    except (AssertionError, ValueError, TypeError):
+        return None
 
 
 def parse_job_object(obj: dict[str, Any], firm: Firm, base_url: str) -> Job | None:
