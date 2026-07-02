@@ -25,3 +25,13 @@ def test_normalize_job_row_maps_legacy_columns():
     assert normalized["first_seen"] == "2026-06-01"
     assert normalized["last_seen"] == "2026-06-02"
 
+
+def test_trusted_board_sources_accept_official_board_titles():
+    row = {
+        "Kanzlei": "A&O Shearman",
+        "Titel": "Facility Specialist",
+        "Link": "https://careers.aoshearman.com/en/job/frankfurt-am-main/facility-specialist/3392/1",
+        "Quelle": "radancy:aoshearman",
+    }
+    normalized = normalize_job_row(row, "2026-06-19")
+    assert normalized["Titel"] == "Facility Specialist"

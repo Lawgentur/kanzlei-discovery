@@ -8,11 +8,14 @@ from pathlib import Path
 import requests
 
 from . import drive
+from .diagnostics import write_no_job_diagnosis
 from .extractors import DirectATSClient, discover_jobboard_url, extract_dom_jobs, extract_llm_jobs, parse_embedded_json_jobs
 from .merge import merge_jobs, remove_stale
 from .models import Firm, Job
 from .quality import normalize_job_row
+from .special_adapters import click_more_results, fetch_special_jobs, run_with_browser
 from .storage import load_firms, load_master, read_csv_rows, save_firms, save_master, write_csv_rows
+from .strategy import SiteStrategy, analyze_strategy_file, load_strategy_cache, strategy_for_firm
 from .models import MASTER_COLUMNS
 
 
@@ -29,6 +32,8 @@ class PipelineConfig:
     llm_fallback: bool = False
     checkpoint_file: Path = Path("state/scrape_checkpoint.json")
     checkpoint_interval: int = 50
+    no_job_report: Path = Path("reports/kanzleien_ohne_jobs_diagnose.csv")
+    strategy_file: Path = Path("state/site_strategies.csv")
     today: str = date.today().isoformat()
 
 
@@ -65,6 +70,7 @@ def run_pipeline(config: PipelineConfig) -> dict[str, int]:
     stats["expired"] = expired
     save_master(config.master_file, master)
     write_csv_rows(config.public_export, master, MASTER_COLUMNS)
+    write_no_job_diagnosis(config.target_file, config.master_file, config.no_job_report, config.today)
     return stats
 
 
@@ -75,7 +81,12 @@ def sanitize_only(config: PipelineConfig) -> dict[str, int]:
     write_csv_rows(config.public_export, master, MASTER_COLUMNS)
     firms = load_firms(config.target_file)
     save_firms(config.target_file, firms)
-    return {"kept_jobs": len(master), "removed_jobs": max(before_rows - len(master), 0), "firms": len(firms)}
+    diagnosis = write_no_job_diagnosis(config.target_file, config.master_file, config.no_job_report, config.today)
+    return {"kept_jobs": len(master), "removed_jobs": max(before_rows - len(master), 0), "firms": len(firms), "no_jobs": diagnosis["no_jobs"]}
+
+
+def analyze_strategies(config: PipelineConfig) -> dict[str, int]:
+    return analyze_strategy_file(config.target_file, config.strategy_file, config.today, config.limit)
 
 
 def rows_to_jobs(rows: list[dict[str, str]], today: str) -> list[Job]:
@@ -101,6 +112,7 @@ def scrape_firms(firms: list[Firm], master: list[dict[str, str]], config: Pipeli
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0 KanzleiDiscovery/0.1", "Accept-Language": "de-DE,de;q=0.9,en;q=0.5"})
     ats_client = DirectATSClient(session=session)
+    strategy_cache = load_strategy_cache(config.strategy_file)
     updated_firms: list[Firm] = list(firms)
     stats = {"new": 0, "updated": 0, "skipped": 0}
     checkpoint = load_scrape_checkpoint(config)
@@ -111,7 +123,7 @@ def scrape_firms(firms: list[Firm], master: list[dict[str, str]], config: Pipeli
 
     for index in range(start_index, len(firms)):
         firm = firms[index]
-        firm_jobs, updated_firm = scrape_one_firm(session, ats_client, firm, config)
+        firm_jobs, updated_firm = scrape_one_firm(session, ats_client, firm, config, strategy_for_firm(strategy_cache, firm))
         updated_firms[index] = updated_firm
         master, firm_stats = merge_jobs(master, firm_jobs, config.today)
         add_stats(stats, firm_stats)
@@ -128,15 +140,32 @@ def scrape_firms(firms: list[Firm], master: list[dict[str, str]], config: Pipeli
     return master, updated_firms, stats
 
 
-def scrape_one_firm(session: requests.Session, ats_client: DirectATSClient, firm: Firm, config: PipelineConfig) -> tuple[list[Job], Firm]:
-    jobboard_url = discover_jobboard_url(session, firm)
+def scrape_one_firm(
+    session: requests.Session,
+    ats_client: DirectATSClient,
+    firm: Firm,
+    config: PipelineConfig,
+    strategy: SiteStrategy | None = None,
+) -> tuple[list[Job], Firm]:
+    jobboard_url = strategy.jobboard_url if strategy and strategy.jobboard_url else discover_jobboard_url(session, firm)
     updated_firm = Firm(name=firm.name, domain=firm.domain, jobboard_url=jobboard_url or firm.jobboard_url)
     if not jobboard_url:
         return [], updated_firm
+    if strategy and strategy.strategy == "skip":
+        return [], updated_firm
+
+    special_result = fetch_special_jobs(session, firm, jobboard_url)
+    if special_result.handled:
+        return special_result.jobs, updated_firm
 
     firm_jobs = ats_client.fetch(firm, jobboard_url)
     if firm_jobs:
         return firm_jobs, updated_firm
+
+    if strategy and strategy.strategy == "playwright":
+        firm_jobs = extract_browser_jobs(firm, jobboard_url)
+        if firm_jobs:
+            return firm_jobs, updated_firm
 
     try:
         response = session.get(jobboard_url, timeout=25)
@@ -153,6 +182,20 @@ def scrape_one_firm(session: requests.Session, ats_client: DirectATSClient, firm
     if config.llm_fallback:
         return extract_llm_jobs(response.text, firm, response.url), updated_firm
     return [], updated_firm
+
+
+def extract_browser_jobs(firm: Firm, url: str) -> list[Job]:
+    def action(page):
+        page.goto(url, wait_until="domcontentloaded", timeout=90000)
+        page.wait_for_timeout(3000)
+        click_more_results(page, max_clicks=12)
+        jobs = extract_dom_jobs(page.content(), firm, page.url)
+        for job in jobs:
+            job.source = "browser"
+            job.source_url = url
+        return jobs
+
+    return run_with_browser(action)
 
 
 def should_write_checkpoint(next_index: int, total: int, config: PipelineConfig) -> bool:

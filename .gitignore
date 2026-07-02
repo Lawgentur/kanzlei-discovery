@@ -4,4 +4,7 @@ __pycache__/
 .pytest_cache/
 .tmp/
 pytest_tmp/
-
+IMPORTS/
+logs/
+state/scrape_checkpoint.json
+state/site_strategies_round2.csv

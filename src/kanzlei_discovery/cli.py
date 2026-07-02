@@ -5,7 +5,7 @@ import os
 from datetime import date
 from pathlib import Path
 
-from .pipeline import PipelineConfig, run_pipeline, sanitize_only
+from .pipeline import PipelineConfig, analyze_strategies, run_pipeline, sanitize_only
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +21,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, help="Limit firm scraping for smoke tests.")
     parser.add_argument("--checkpoint-file", default="state/scrape_checkpoint.json")
     parser.add_argument("--checkpoint-interval", type=int, default=50)
+    parser.add_argument("--no-job-report", default="reports/kanzleien_ohne_jobs_diagnose.csv")
+    parser.add_argument("--strategy-file", default="state/site_strategies.csv")
+    parser.add_argument("--analyze-strategies", action="store_true", help="Analyze target job pages and cache the best scrape strategy.")
     parser.add_argument("--sanitize-only", action="store_true", help="Only normalize jobs_master and target firms, then export.")
     return parser
 
@@ -39,10 +42,17 @@ def main(argv: list[str] | None = None) -> int:
         llm_fallback=args.llm_fallback,
         checkpoint_file=Path(args.checkpoint_file),
         checkpoint_interval=args.checkpoint_interval,
+        no_job_report=Path(args.no_job_report),
+        strategy_file=Path(args.strategy_file),
         today=date.today().isoformat(),
     )
 
-    stats = sanitize_only(config) if args.sanitize_only else run_pipeline(config)
+    if args.analyze_strategies:
+        stats = analyze_strategies(config)
+    elif args.sanitize_only:
+        stats = sanitize_only(config)
+    else:
+        stats = run_pipeline(config)
     for key, value in stats.items():
         print(f"{key}: {value}")
     print(f"COMMIT_MSG=Jobs pipeline: +{stats.get('new', 0)} new, ~{stats.get('updated', 0)} updated, -{stats.get('expired', 0)} expired")

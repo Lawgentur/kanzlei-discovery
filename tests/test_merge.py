@@ -26,6 +26,16 @@ def test_merge_adds_new_valid_job_and_skips_bad_rows():
     assert merged[0]["Titel"] == "Associate Corporate (m/w/d)"
 
 
+def test_merge_keeps_distinct_trusted_board_links_with_same_title_and_city():
+    jobs = [
+        Job("Facility Specialist", "https://careers.aoshearman.com/en/job/frankfurt/1", "A&O Shearman", "Frankfurt", "radancy:aoshearman"),
+        Job("Facility Specialist", "https://careers.aoshearman.com/en/job/frankfurt/2", "A&O Shearman", "Frankfurt", "radancy:aoshearman"),
+    ]
+    merged, stats = merge_jobs([], jobs, "2026-06-19")
+    assert stats == {"new": 2, "updated": 0, "skipped": 0}
+    assert len(merged) == 2
+
+
 def test_remove_stale():
     rows = [
         {"last_seen": "2026-06-01"},
@@ -34,4 +44,3 @@ def test_remove_stale():
     kept, deleted = remove_stale(rows, "2026-06-02", 30)
     assert len(kept) == 1
     assert deleted == 1
-

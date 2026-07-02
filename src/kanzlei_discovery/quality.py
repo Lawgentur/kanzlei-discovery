@@ -26,6 +26,7 @@ REJECT_EXACT = {
     "filter",
     "home",
     "impressum",
+    "initiativbewerbung",
     "jobs & karriere",
     "karriere",
     "kontakt",
@@ -137,6 +138,22 @@ JOB_MARKERS = [
     "w/m/d",
 ]
 
+TRUSTED_BOARD_SOURCES = (
+    "api:cms",
+    "api:bdo-typesense",
+    "api:dlapiper",
+    "api:pwc-phenom",
+    "browser:cms",
+    "browser:wts",
+    "dom:dlapiper",
+    "dom:fieldfisher",
+    "dom:winheller",
+    "personio:eagle",
+    "radancy:aoshearman",
+    "reader:cms",
+    "reader:skadden",
+)
+
 
 def repair_text(value: str) -> str:
     text = str(value or "").strip()
@@ -227,11 +244,18 @@ def normalize_job_row(row: dict[str, str], today: str) -> dict[str, str] | None:
 
     if not title or not firm or not link:
         return None
-    if not is_likely_job_title(title, link):
+    if not is_likely_job_title(title, link) and not is_trusted_board_title(title, source):
         return None
 
     first_seen = normalize_date(row.get("first_seen") or row.get("Erstes_Funddatum") or row.get("Erscheinen") or row.get("Posted_Date") or "", today)
     last_seen = normalize_date(row.get("last_seen") or row.get("Zuletzt_Gesehen") or "", today)
+    posting_date = normalize_date(row.get("posting_date") or row.get("Posted_Date") or row.get("Erscheinen") or first_seen, first_seen)
+    imported_at = normalize_date(row.get("imported_at") or row.get("Upload am") or row.get("imported") or first_seen, first_seen)
+    scraped_at = normalize_date(row.get("scraped_at") or row.get("Scraped am") or last_seen, last_seen)
+    last_checked_at = normalize_date(row.get("last_checked_at") or row.get("checked_at") or last_seen, last_seen)
+    status = repair_text(row.get("status") or "active").lower()
+    if status not in {"active", "stale", "removed", "uncertain"}:
+        status = "active"
     if source.lower() == "nan":
         source = ""
 
@@ -243,6 +267,13 @@ def normalize_job_row(row: dict[str, str], today: str) -> dict[str, str] | None:
         "Quelle": source or "legacy",
         "first_seen": first_seen,
         "last_seen": last_seen,
+        "posting_date": posting_date,
+        "imported_at": imported_at,
+        "scraped_at": scraped_at,
+        "last_checked_at": last_checked_at,
+        "source_url": canonical_link(row.get("source_url") or row.get("Source_URL") or link) or link,
+        "status": status,
+        "canonical_firm_id": row.get("canonical_firm_id") or canonical_firm_id(firm),
     }
 
 
@@ -252,3 +283,34 @@ def normalize_job(job: Job, today: str) -> dict[str, str] | None:
 
 def ensure_master_columns(row: dict[str, str]) -> dict[str, str]:
     return {column: (row.get(column) or "").strip() for column in MASTER_COLUMNS}
+
+
+def canonical_firm_id(name: str) -> str:
+    value = repair_text(name).casefold()
+    value = value.replace("&", " und ")
+    value = value.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+    value = re.sub(
+        r"\b(llp|mbb|partg|partgmbb|gmbh|ag|kg|ohg|partnerschaft|rechtsanwälte|rechtsanwaelte|rechtsanwalt|steuerberater|wirtschaftsprüfer|wirtschaftspruefer|notare|notar|kanzlei|law|legal|partner|partners)\b",
+        " ",
+        value,
+    )
+    value = re.sub(r"[^a-z0-9]+", "-", value).strip("-")
+    return value or "unknown"
+
+
+def is_trusted_board_title(title: str, source: str) -> bool:
+    if not is_trusted_board_source(source):
+        return False
+    text = re.sub(r"\s+", " ", (title or "").strip())
+    lower = text.lower()
+    if len(text) < 5 or len(text) > 220 or len(text.split()) > 24:
+        return False
+    if lower in REJECT_EXACT:
+        return False
+    if re.search(r"cookie|datenschutz|impressum|privacy|newsletter|login|registrieren", lower):
+        return False
+    return True
+
+
+def is_trusted_board_source(source: str) -> bool:
+    return any((source or "").startswith(prefix) for prefix in TRUSTED_BOARD_SOURCES)
