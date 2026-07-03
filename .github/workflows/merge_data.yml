@@ -1,8 +1,6 @@
 name: Kanzlei Discovery Pipeline
 
 on:
-  schedule:
-    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       scrape:
@@ -78,4 +76,3 @@ jobs:
             git commit -m "$MSG"
             git push
           fi
-
