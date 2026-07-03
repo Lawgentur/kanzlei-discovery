@@ -1,0 +1,24 @@
+{
+  "files": {
+    "dde5974e4080d02a1196dd7c71929dfe37b350af4bc5ab05a8ace2200d772155": {
+      "path": "IMPORTS\\🔥 Indeed Scraper 2026-06-29 (1).xlsx",
+      "source": "indeed",
+      "imported_at": "2026-07-03",
+      "input_rows": 0,
+      "new": 0,
+      "updated": 0,
+      "skipped": 0,
+      "marked_existing": true
+    },
+    "2aa4b9575dbe6e0d8322bdba2f089f0ace4f2a3244c1ff848e590693bd7aea93": {
+      "path": "IMPORTS\\Stepstone Listing Scrape 2026-06-29 (1).xlsx",
+      "source": "stepstone",
+      "imported_at": "2026-07-03",
+      "input_rows": 0,
+      "new": 0,
+      "updated": 0,
+      "skipped": 0,
+      "marked_existing": true
+    }
+  }
+}
