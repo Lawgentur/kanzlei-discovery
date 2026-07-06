@@ -11,6 +11,19 @@ $logDir = Join-Path $RepoRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $logFile = Join-Path $logDir "weekly_scrape_$stamp.log"
 
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Arguments
+    )
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FilePath failed with exit code $LASTEXITCODE"
+    }
+}
+
 Start-Transcript -Path $logFile -Append | Out-Null
 try {
     Write-Host "WEEKLY_SCRAPE_START $stamp"
@@ -23,28 +36,29 @@ try {
         }
     }
 
-    git pull --rebase origin main
+    Invoke-Native git pull --rebase origin main
 
-    python -m kanzlei_discovery.cli `
+    Invoke-Native python -m kanzlei_discovery.cli `
         --no-drive `
         --scrape `
         --llm-fallback `
+        --days-until-deletion 3650 `
         --checkpoint-interval 50 `
         --strategy-file state/site_strategies.csv `
         --no-job-report "reports/kanzleien_ohne_jobs_diagnose_$today.csv"
 
-    python scripts/import_job_boards.py `
+    Invoke-Native python scripts/import_job_boards.py `
         --date $today `
         --report-file "reports/import_report_$today.csv" `
         --no-job-report "reports/kanzleien_ohne_jobs_diagnose_$today.csv"
 
-    python -m pytest -q
+    Invoke-Native python -m pytest -q
 
-    git add jobs_master.csv media/jobs_master_public.csv target_firms_full.csv reports state/imported_board_files.json
+    Invoke-Native git add jobs_master.csv media/jobs_master_public.csv target_firms_full.csv reports state/imported_board_files.json
     $changes = git status --porcelain
     if ($changes) {
-        git commit -m "Weekly jobs scrape $today"
-        git push origin main
+        Invoke-Native git commit -m "Weekly jobs scrape $today"
+        Invoke-Native git push origin main
         Write-Host "WEEKLY_SCRAPE_COMMITTED $today"
     } else {
         Write-Host "WEEKLY_SCRAPE_NO_CHANGES $today"
