@@ -52,6 +52,11 @@ try {
         --report-file "reports/import_report_$today.csv" `
         --no-job-report "reports/kanzleien_ohne_jobs_diagnose_$today.csv"
 
+    Invoke-Native python scripts/import_xml_feeds.py `
+        --date $today `
+        --report-file "reports/xml_feed_import_report_$today.csv" `
+        --no-job-report "reports/kanzleien_ohne_jobs_diagnose_$today.csv"
+
     Invoke-Native python -m pytest -q
 
     Invoke-Native git add jobs_master.csv media/jobs_master_public.csv target_firms_full.csv reports state/imported_board_files.json
