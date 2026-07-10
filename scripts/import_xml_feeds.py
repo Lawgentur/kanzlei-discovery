@@ -18,7 +18,16 @@ from kanzlei_discovery.storage import load_master, save_master, write_csv_rows
 
 
 REPORT_COLUMNS = ["feed", "source", "input_rows", "new", "updated", "skipped", "master_before", "master_after"]
-DEFAULT_FEEDS = ["heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/4741"]
+DEFAULT_FEEDS = [
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/4741",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/4541",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/4540",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/4489",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/4405",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/4320",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/3563",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/2816",
+]
 
 
 @dataclass(frozen=True)
