@@ -27,6 +27,15 @@ DEFAULT_FEEDS = [
     "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/4320",
     "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/3563",
     "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/2816",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/2736",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/2606",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/2182",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/1700",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/1697",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/1696",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/1332",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/1182",
+    "heyrecruit=https://www.heyrecruit.de/jobs/companyJobsXml/1174",
 ]
 
 
