@@ -37,6 +37,24 @@
       "new": 364,
       "updated": 2358,
       "skipped": 152
+    },
+    "1a7b4135ee67ecab83234a16c7f93c2bff42361b8def76cb0c45e772d1de51fe": {
+      "path": "IMPORTS\\🔥 Indeed Scraper 2026-07-13.xlsx",
+      "source": "indeed",
+      "imported_at": "2026-07-14",
+      "input_rows": 4192,
+      "new": 357,
+      "updated": 3675,
+      "skipped": 160
+    },
+    "3a3f71553ce5f7429610a46e88b6bdabd9857d435841b8638a0ee8eb48be0b4d": {
+      "path": "IMPORTS\\Stepstone Recht_Steuer Scrape 2026-07-13.xlsx",
+      "source": "stepstone",
+      "imported_at": "2026-07-14",
+      "input_rows": 6508,
+      "new": 294,
+      "updated": 5941,
+      "skipped": 273
     }
   }
 }
