@@ -27,8 +27,15 @@ REPORT_COLUMNS = [
 ]
 
 
+SOURCE_COLUMNS = {
+    "stepstone": {"Job_Titel", "Titel_url", "Name_des_Unternehmens", "Standort", "Erscheinen"},
+    "indeed": {"Job_Title", "Job_URL", "Company_Name", "Location", "Posted_Date"},
+}
+SUPPORTED_IMPORT_SUFFIXES = {".csv", ".xlsx"}
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Import new Indeed and Stepstone Excel exports into jobs_master.csv.")
+    parser = argparse.ArgumentParser(description="Import new Indeed and Stepstone CSV/Excel exports into jobs_master.csv.")
     parser.add_argument("--imports-dir", default="IMPORTS")
     parser.add_argument("--master-file", default="jobs_master.csv")
     parser.add_argument("--public-export", default="media/jobs_master_public.csv")
@@ -120,7 +127,12 @@ def discover_import_files(imports_dir: Path) -> list[tuple[str, Path]]:
     if not imports_dir.exists():
         return []
     files: list[tuple[str, Path]] = []
-    for path in sorted(imports_dir.glob("*.xlsx"), key=lambda item: item.stat().st_mtime):
+    candidates = (
+        path
+        for path in imports_dir.iterdir()
+        if path.is_file() and path.suffix.casefold() in SUPPORTED_IMPORT_SUFFIXES
+    )
+    for path in sorted(candidates, key=lambda item: item.stat().st_mtime):
         lower = path.name.casefold()
         if "stepstone" in lower:
             files.append(("stepstone", path))
@@ -130,7 +142,12 @@ def discover_import_files(imports_dir: Path) -> list[tuple[str, Path]]:
 
 
 def load_jobs(source: str, path: Path, today: str) -> list[Job]:
-    df = pd.read_excel(path, sheet_name=0, dtype=str).fillna("")
+    df = read_export(path)
+    missing = SOURCE_COLUMNS[source] - set(df.columns)
+    if missing:
+        missing_list = ", ".join(sorted(missing))
+        raise ValueError(f"{path.name}: missing required {source} columns: {missing_list}")
+
     jobs: list[Job] = []
     for _, row in df.iterrows():
         if source == "stepstone":
@@ -152,13 +169,36 @@ def load_jobs(source: str, path: Path, today: str) -> list[Job]:
                 firm=firm,
                 city=city,
                 source=source,
-                first_seen=posted,
+                first_seen=today,
                 last_seen=today,
                 posting_date=posted,
                 source_url=link,
             )
         )
     return jobs
+
+
+def read_export(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.casefold()
+    if suffix == ".xlsx":
+        df = pd.read_excel(path, sheet_name=0, dtype=str)
+    elif suffix == ".csv":
+        df = read_csv_export(path)
+    else:
+        raise ValueError(f"Unsupported board export format: {path.suffix}")
+
+    df.columns = [str(column).lstrip("\ufeff").strip() for column in df.columns]
+    return df.fillna("")
+
+
+def read_csv_export(path: Path) -> pd.DataFrame:
+    last_error: UnicodeDecodeError | None = None
+    for encoding in ("utf-8-sig", "utf-8", "cp1252"):
+        try:
+            return pd.read_csv(path, dtype=str, sep=None, engine="python", encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    raise ValueError(f"Could not decode CSV export {path.name}") from last_error
 
 
 def clean(value) -> str:

@@ -54,10 +54,12 @@ Enable LLM fallback only when an API key is configured:
 kanzlei-discovery --no-drive --scrape --llm-fallback
 ```
 
+Place new Octoparse Indeed or Stepstone exports in `IMPORTS/`. Both `.csv` and
+`.xlsx` files are supported; already processed files are skipped by checksum.
+
 ## Project Layout
 
 - `src/kanzlei_discovery/`: production pipeline code.
 - `tests/`: parser, merge, and quality tests.
 - `archive/`: old OpenClaw, import, simulation, and broken scraper artifacts kept for reference.
 - `media/`: frontend-facing static/export files.
-

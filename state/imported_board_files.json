@@ -55,6 +55,15 @@
       "new": 294,
       "updated": 5941,
       "skipped": 273
+    },
+    "c96819fdd8ad251740ec28bbf8597f0a2a774589c8003c2cb9f110afcc638592": {
+      "path": "IMPORTS\\Stepstone Kanzlei Jobs CLOUD.csv",
+      "source": "stepstone",
+      "imported_at": "2026-08-13",
+      "input_rows": 6472,
+      "new": 1022,
+      "updated": 5179,
+      "skipped": 271
     }
   }
 }
