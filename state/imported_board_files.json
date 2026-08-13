@@ -64,6 +64,15 @@
       "new": 1022,
       "updated": 5179,
       "skipped": 271
+    },
+    "42f12a6bf249df9074baac76a51ca865265c76da63f74d45fa1bfb12cd6b3979": {
+      "path": "IMPORTS\\Indeed Kanzlei JOBS CLOUD.csv",
+      "source": "indeed",
+      "imported_at": "2026-08-13",
+      "input_rows": 3982,
+      "new": 2715,
+      "updated": 1173,
+      "skipped": 94
     }
   }
 }
