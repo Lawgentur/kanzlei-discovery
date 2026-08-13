@@ -59,6 +59,7 @@ try {
 
     Invoke-Native python scripts/import_job_boards.py `
         --date $today `
+        --stable-for-seconds 180 `
         --report-file "reports/import_report_$today.csv" `
         --no-job-report "reports/kanzleien_ohne_jobs_diagnose_$today.csv"
 

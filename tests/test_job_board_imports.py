@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.import_job_boards import discover_import_files, load_jobs
+from scripts.import_job_boards import discover_import_files, load_jobs, stable_import_files
 
 
 def test_discovers_csv_and_excel_board_exports(tmp_path: Path):
@@ -45,3 +45,22 @@ def test_rejects_csv_with_unexpected_columns(tmp_path: Path):
 
     with pytest.raises(ValueError, match="missing required stepstone columns"):
         load_jobs("stepstone", export, "2026-08-13")
+
+
+def test_stability_check_keeps_unchanged_files(tmp_path: Path):
+    export = tmp_path / "Indeed Export.csv"
+    export.write_text("complete", encoding="utf-8")
+
+    files = [("indeed", export)]
+
+    assert stable_import_files(files, 0) == files
+
+
+def test_stability_check_defers_changed_files(tmp_path: Path, monkeypatch):
+    export = tmp_path / "Stepstone Export.csv"
+    export.write_text("partial", encoding="utf-8")
+    snapshots = iter([(7, 1), (15, 2)])
+    monkeypatch.setattr("scripts.import_job_boards.file_snapshot", lambda path: next(snapshots))
+    monkeypatch.setattr("scripts.import_job_boards.time.sleep", lambda seconds: None)
+
+    assert stable_import_files([("stepstone", export)], 180) == []

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import math
+import time
 from datetime import date
 from pathlib import Path
 
@@ -44,6 +45,12 @@ def main() -> int:
     parser.add_argument("--no-job-report", default="reports/kanzleien_ohne_jobs_diagnose.csv")
     parser.add_argument("--target-file", default="target_firms_full.csv")
     parser.add_argument("--date", default=date.today().isoformat())
+    parser.add_argument(
+        "--stable-for-seconds",
+        type=int,
+        default=0,
+        help="Only import files whose size and modification time stay unchanged for this many seconds.",
+    )
     parser.add_argument("--mark-existing", action="store_true", help="Record matching files as already processed without importing them.")
     args = parser.parse_args()
 
@@ -77,7 +84,8 @@ def main() -> int:
     report_rows = []
     imported_files = 0
 
-    for source, path in discover_import_files(imports_dir):
+    import_files = stable_import_files(discover_import_files(imports_dir), args.stable_for_seconds)
+    for source, path in import_files:
         fingerprint = file_fingerprint(path)
         if fingerprint in state.get("files", {}):
             continue
@@ -139,6 +147,35 @@ def discover_import_files(imports_dir: Path) -> list[tuple[str, Path]]:
         elif "indeed" in lower:
             files.append(("indeed", path))
     return files
+
+
+def stable_import_files(
+    files: list[tuple[str, Path]], stable_for_seconds: int
+) -> list[tuple[str, Path]]:
+    if stable_for_seconds <= 0 or not files:
+        return files
+
+    snapshots = {path: file_snapshot(path) for _, path in files}
+    print(f"BOARD_IMPORTS waiting_for_stability={stable_for_seconds}s files={len(files)}")
+    time.sleep(stable_for_seconds)
+
+    stable: list[tuple[str, Path]] = []
+    for source, path in files:
+        before = snapshots[path]
+        after = file_snapshot(path)
+        if before is not None and before == after:
+            stable.append((source, path))
+        else:
+            print(safe_console(f"DEFERRED_UNSTABLE {source} {path.name}"))
+    return stable
+
+
+def file_snapshot(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_size, stat.st_mtime_ns
 
 
 def load_jobs(source: str, path: Path, today: str) -> list[Job]:

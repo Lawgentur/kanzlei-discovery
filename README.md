@@ -56,6 +56,8 @@ kanzlei-discovery --no-drive --scrape --llm-fallback
 
 Place new Octoparse Indeed or Stepstone exports in `IMPORTS/`. Both `.csv` and
 `.xlsx` files are supported; already processed files are skipped by checksum.
+The weekly task waits three minutes and only imports files whose size and
+modification time remain unchanged during that interval.
 
 ## Project Layout
 
