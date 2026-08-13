@@ -59,6 +59,11 @@ Place new Octoparse Indeed or Stepstone exports in `IMPORTS/`. Both `.csv` and
 The weekly task waits three minutes and only imports files whose size and
 modification time remain unchanged during that interval.
 
+The Windows task `KanzleiDiscovery Prepare Octoparse` wakes the computer from
+sleep on Saturdays at 23:50, starts Octoparse when needed, and keeps Windows
+awake while the Sunday cloud exports and the 05:00 pipeline run. A fully shut
+down computer cannot be woken by Task Scheduler.
+
 ## Project Layout
 
 - `src/kanzlei_discovery/`: production pipeline code.
