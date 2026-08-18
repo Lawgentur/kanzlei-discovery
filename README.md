@@ -59,6 +59,10 @@ Place new Octoparse Indeed or Stepstone exports in `IMPORTS/`. Both `.csv` and
 The weekly task waits three minutes and only imports files whose size and
 modification time remain unchanged during that interval.
 
+The weekly pipeline also downloads the latest completed Indeed and Stepstone
+cloud batches directly through the Octoparse API before running the board
+importer. This path does not depend on the Octoparse desktop login.
+
 The Windows task `KanzleiDiscovery Prepare Octoparse` wakes the computer from
 sleep on Saturdays at 23:50, starts Octoparse when needed, and keeps Windows
 awake while the Sunday cloud exports and the 05:00 pipeline run. A fully shut

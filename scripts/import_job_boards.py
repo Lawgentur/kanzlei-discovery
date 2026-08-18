@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from kanzlei_discovery.diagnostics import write_no_job_diagnosis
-from kanzlei_discovery.merge import merge_jobs
+from kanzlei_discovery.merge import fallback_key, merge_jobs
 from kanzlei_discovery.models import MASTER_COLUMNS, Job
 from kanzlei_discovery.storage import load_master, save_master, write_csv_rows
 
@@ -81,6 +81,7 @@ def main() -> int:
         return 0
 
     master = load_master(args.master_file, args.date)
+    master, duplicates_removed = deduplicate_board_rows(master)
     report_rows = []
     imported_files = 0
 
@@ -117,18 +118,80 @@ def main() -> int:
         imported_files += 1
         print(safe_console(f"IMPORTED {source} {path.name} new={stats['new']} updated={stats['updated']} skipped={stats['skipped']}"))
 
-    if imported_files:
+    if imported_files or duplicates_removed:
         save_master(args.master_file, master)
         write_csv_rows(args.public_export, master, MASTER_COLUMNS)
-        write_csv_rows(report_file, report_rows, REPORT_COLUMNS)
+        if report_rows:
+            write_csv_rows(report_file, report_rows, REPORT_COLUMNS)
         write_no_job_diagnosis(args.target_file, args.master_file, args.no_job_report, args.date)
     save_state(state_file, state)
-    print(f"BOARD_IMPORTS imported_files={imported_files}")
+    print(
+        f"BOARD_IMPORTS imported_files={imported_files} "
+        f"duplicates_removed={duplicates_removed}"
+    )
     return 0
 
 
 def safe_console(value: str) -> str:
     return value.encode("ascii", errors="backslashreplace").decode("ascii")
+
+
+def deduplicate_board_rows(
+    rows: list[dict[str, str]],
+) -> tuple[list[dict[str, str]], int]:
+    board_sources = {"indeed", "stepstone"}
+    board_keys = {
+        fallback_key(row)
+        for row in rows
+        if row.get("Quelle", "").casefold() in board_sources and fallback_key(row)
+    }
+    kept: list[dict[str, str]] = []
+    by_key: dict[str, int] = {}
+    removed = 0
+
+    for row in rows:
+        key = fallback_key(row)
+        if not key or key not in board_keys:
+            kept.append(row)
+            continue
+        idx = by_key.get(key)
+        if idx is None:
+            by_key[key] = len(kept)
+            kept.append(row)
+            continue
+        kept[idx] = merge_duplicate_rows(kept[idx], row, board_sources)
+        removed += 1
+    return kept, removed
+
+
+def merge_duplicate_rows(
+    first: dict[str, str],
+    second: dict[str, str],
+    board_sources: set[str],
+) -> dict[str, str]:
+    first_is_board = first.get("Quelle", "").casefold() in board_sources
+    second_is_board = second.get("Quelle", "").casefold() in board_sources
+    preferred = second.copy() if first_is_board and not second_is_board else first.copy()
+
+    preferred["first_seen"] = earliest(first.get("first_seen", ""), second.get("first_seen", ""))
+    preferred["first_seen_at"] = earliest(
+        first.get("first_seen_at", ""), second.get("first_seen_at", "")
+    )
+    for field in ("last_seen", "last_checked_at", "scraped_at"):
+        preferred[field] = latest(first.get(field, ""), second.get(field, ""))
+    if first.get("status") == "active" or second.get("status") == "active":
+        preferred["status"] = "active"
+    return preferred
+
+
+def earliest(first: str, second: str) -> str:
+    values = [value for value in (first, second) if value]
+    return min(values) if values else ""
+
+
+def latest(first: str, second: str) -> str:
+    values = [value for value in (first, second) if value]
+    return max(values) if values else ""
 
 
 def discover_import_files(imports_dir: Path) -> list[tuple[str, Path]]:

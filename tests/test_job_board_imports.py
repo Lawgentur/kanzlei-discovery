@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from scripts.import_job_boards import discover_import_files, load_jobs, stable_import_files
+from scripts.import_job_boards import (
+    deduplicate_board_rows,
+    discover_import_files,
+    load_jobs,
+    stable_import_files,
+)
 
 
 def test_discovers_csv_and_excel_board_exports(tmp_path: Path):
@@ -64,3 +69,34 @@ def test_stability_check_defers_changed_files(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("scripts.import_job_boards.time.sleep", lambda seconds: None)
 
     assert stable_import_files([("stepstone", export)], 180) == []
+
+
+def test_deduplicates_board_rows_by_firm_title_and_city():
+    rows = [
+        {
+            "Titel": "Associate  Arbeitsrecht",
+            "Link": "https://example.com/direct-job",
+            "Kanzlei": "Muster & Partner",
+            "Stadt": "Berlin",
+            "Quelle": "dom",
+            "first_seen": "2026-08-01",
+            "last_seen": "2026-08-10",
+        },
+        {
+            "Titel": "Associate\nArbeitsrecht",
+            "Link": "https://indeed.example/job-1",
+            "Kanzlei": "Muster & Partner",
+            "Stadt": "Berlin",
+            "Quelle": "indeed",
+            "first_seen": "2026-08-05",
+            "last_seen": "2026-08-16",
+        },
+    ]
+
+    deduplicated, removed = deduplicate_board_rows(rows)
+
+    assert removed == 1
+    assert len(deduplicated) == 1
+    assert deduplicated[0]["Link"] == "https://example.com/direct-job"
+    assert deduplicated[0]["first_seen"] == "2026-08-01"
+    assert deduplicated[0]["last_seen"] == "2026-08-16"

@@ -61,5 +61,8 @@ def remove_stale(master_rows: list[dict[str, str]], today: str, days_until_delet
 
 
 def fallback_key(row: dict[str, str]) -> str:
-    parts = [row.get("Kanzlei", "").lower().strip(), row.get("Titel", "").lower().strip(), row.get("Stadt", "").lower().strip()]
+    parts = [
+        " ".join(row.get(field, "").casefold().split())
+        for field in ("Kanzlei", "Titel", "Stadt")
+    ]
     return "|".join(parts) if parts[0] and parts[1] else ""
