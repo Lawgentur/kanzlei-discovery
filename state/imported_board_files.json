@@ -91,6 +91,15 @@
       "new": 76,
       "updated": 5390,
       "skipped": 237
+    },
+    "a3137b770daf32f35ce52f60d876220669dec996c1189ec5a91a0ea3119a978b": {
+      "path": "IMPORTS\\Indeed Octoparse API 2026-08-23 lot-639230328357514664.csv",
+      "source": "indeed",
+      "imported_at": "2026-08-23",
+      "input_rows": 3934,
+      "new": 313,
+      "updated": 3533,
+      "skipped": 88
     }
   }
 }
