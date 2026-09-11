@@ -100,6 +100,24 @@
       "new": 313,
       "updated": 3533,
       "skipped": 88
+    },
+    "1814cb0f8e15053c144b190b0e70d05adca077eeae0e2d83176c6358b2bfa8e1": {
+      "path": "IMPORTS\\Indeed Octoparse API 2026-09-11 lot-639247283179133175.csv",
+      "source": "indeed",
+      "imported_at": "2026-09-11",
+      "input_rows": 1681,
+      "new": 212,
+      "updated": 1408,
+      "skipped": 61
+    },
+    "e93a574bd0313f1803453398c5b1432f220191608549033e73c2934350572fd0": {
+      "path": "IMPORTS\\Stepstone Octoparse API 2026-09-11 lot-639247283195193475.csv",
+      "source": "stepstone",
+      "imported_at": "2026-09-11",
+      "input_rows": 6351,
+      "new": 767,
+      "updated": 5316,
+      "skipped": 268
     }
   }
 }
