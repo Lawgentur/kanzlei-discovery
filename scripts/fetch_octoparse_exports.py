@@ -26,6 +26,13 @@ def main() -> int:
     parser.add_argument("--page-size", type=int, default=1000)
     parser.add_argument("--wait-timeout-seconds", type=int, default=0)
     parser.add_argument("--poll-seconds", type=int, default=60)
+    parser.add_argument(
+        "--sources",
+        nargs="+",
+        choices=sorted(TASKS),
+        default=list(TASKS),
+        help="Only download the selected Octoparse sources.",
+    )
     args = parser.parse_args()
 
     load_env(Path(args.env_file))
@@ -36,7 +43,8 @@ def main() -> int:
     headers = {"x-api-key": api_key}
 
     downloaded = 0
-    for source, task_env_name in TASKS.items():
+    for source in args.sources:
+        task_env_name = TASKS[source]
         task_id = required_env(task_env_name)
         status = wait_for_completed(
             session,

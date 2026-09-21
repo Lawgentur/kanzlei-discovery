@@ -54,14 +54,23 @@ Enable LLM fallback only when an API key is configured:
 kanzlei-discovery --no-drive --scrape --llm-fallback
 ```
 
-Place new Octoparse Indeed or Stepstone exports in `IMPORTS/`. Both `.csv` and
+Place new Indeed or Stepstone exports in `IMPORTS/`. Both `.csv` and
 `.xlsx` files are supported; already processed files are skipped by checksum.
 The weekly task waits three minutes and only imports files whose size and
 modification time remain unchanged during that interval.
 
-The weekly pipeline also downloads the latest completed Indeed and Stepstone
-cloud batches directly through the Octoparse API before running the board
-importer. This path does not depend on the Octoparse desktop login.
+Stepstone is fetched directly from the searches in
+`config/stepstone_searches.json`. The adapter paginates the embedded structured
+result data, deduplicates by Stepstone ID, checkpoints after every configured
+search, and writes an import-compatible CSV:
+
+```bash
+python scripts/fetch_stepstone_jobs.py
+```
+
+The weekly pipeline downloads only the latest Indeed cloud batch through the
+Octoparse API before running the common board importer. This path does not
+depend on the Octoparse desktop login.
 
 The Windows task `KanzleiDiscovery Prepare Octoparse` wakes the computer from
 sleep on Saturdays at 23:50, starts Octoparse when needed, and keeps Windows

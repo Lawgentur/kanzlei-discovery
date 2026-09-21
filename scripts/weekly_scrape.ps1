@@ -57,9 +57,13 @@ try {
         --strategy-file state/site_strategies.csv `
         --no-job-report "reports/kanzleien_ohne_jobs_diagnose_$today.csv"
 
+    Invoke-Native python scripts/fetch_stepstone_jobs.py `
+        --date $today
+
     Invoke-Native python scripts/fetch_octoparse_exports.py `
         --date $today `
-        --wait-timeout-seconds 3600
+        --wait-timeout-seconds 3600 `
+        --sources indeed
 
     Invoke-Native python scripts/import_job_boards.py `
         --date $today `
