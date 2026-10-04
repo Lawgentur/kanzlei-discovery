@@ -127,6 +127,15 @@
       "new": 436,
       "updated": 1974,
       "skipped": 126
+    },
+    "4bb9790454a1796382b7f755fecd08edd03abe33706abab7613de858fa0ae3b3": {
+      "path": "IMPORTS\\Stepstone Direct 2026-10-04.csv",
+      "source": "stepstone",
+      "imported_at": "2026-10-04",
+      "input_rows": 2537,
+      "new": 217,
+      "updated": 2195,
+      "skipped": 125
     }
   }
 }
